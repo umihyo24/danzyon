@@ -1,6 +1,6 @@
 const CONFIG = {
   tileSize: 40,
-  viewport: { w: 15, h: 11 },
+  viewport: { w: 9, h: 9 },
   town: { w: 24, h: 16 },
   floor: { w: 40, h: 28 },
   baseEnemyHp: 3,
@@ -11,6 +11,7 @@ const CONFIG = {
   reviveHp: 2,
   dangerRadius: 3,
   logLimit: 6,
+  oxygenPerTurn: 1,
 };
 
 const ASSETS = {
@@ -45,7 +46,7 @@ const gameState = {
   phase: "start", // start | town | playing | gameover
   assets: { images: {}, loaded: false },
   ui: {
-    message: "ようこそ。",
+    messages: ["ようこそ。"],
     effects: [],
   },
   town: {
@@ -62,9 +63,14 @@ const gameState = {
     pp: 3,
     reviveUsed: false,
     facing: 1,
+    itemSlot: null,
+    maxOxygen: 30,
+    oxygen: 30,
+    fishThisRun: 0,
+    totalFish: 0,
   },
   mission: {
-    targetItemName: "コア",
+    targetItemName: "魚",
     retrieved: false,
     accepted: false,
   },
@@ -78,12 +84,14 @@ const controlsEl = document.querySelector("#controls");
 const logEl = document.querySelector("#log");
 
 function addLog(msg) {
-  gameState.ui.message = msg;
+  gameState.ui.messages.unshift(msg);
+  gameState.ui.messages = gameState.ui.messages.slice(0, 2);
 }
 
 function addProjectileEffect(fromX, fromY, toX, toY, emoji = "🧊") {
   gameState.ui.effects.push({
     id: Date.now() + Math.random(),
+    kind: "projectile",
     fromX,
     fromY,
     toX,
@@ -95,6 +103,21 @@ function addProjectileEffect(fromX, fromY, toX, toY, emoji = "🧊") {
     gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
     render();
   }, 430);
+}
+
+function addDamageEffect(x, y, text) {
+  gameState.ui.effects.push({
+    id: Date.now() + Math.random(),
+    kind: "damage",
+    x,
+    y,
+    text,
+    expiresAt: Date.now() + 550,
+  });
+  setTimeout(() => {
+    gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
+    render();
+  }, 560);
 }
 
 function makePlaceholder(char, bg) {
@@ -114,11 +137,11 @@ function makePlaceholder(char, bg) {
 
 function loadAssets() {
   const fallback = {
-    floor: makePlaceholder("·", "#3a344e"),
-    wall: makePlaceholder("■", "#100f16"),
+    floor: makePlaceholder("·", "#1d3f4b"),
+    wall: makePlaceholder("■", "#0b1d28"),
     player: makePlaceholder("@", "#355f2f"),
     enemy: makePlaceholder("M", "#6a2f2f"),
-    item: makePlaceholder("◆", "#635317"),
+    item: makePlaceholder("🐟", "#6b5d1f"),
     heal: makePlaceholder("+", "#2f5f5f"),
     stairs: makePlaceholder("X", "#244863"),
     train: makePlaceholder("T", "#355f2f"),
@@ -229,7 +252,7 @@ function spawnEnemyOfType(area, x, y, typeId, hpOverride = null) {
   }
 }
 
-function makeDungeonFloor() {
+function makeDungeonFloor(depth = 1) {
   const area = createArea(CONFIG.floor.w, CONFIG.floor.h);
   const rooms = [
     { x: 2, y: 2, w: 8, h: 6 },
@@ -247,11 +270,18 @@ function makeDungeonFloor() {
   carveCorridor(area, centers[1], centers[4]);
 
   area.playerPos = { x: centers[0].x, y: centers[0].y };
-  area.objects.push({ type: "X", x: centers[0].x + 1, y: centers[0].y + 1 }); // extraction
-  area.objects.push({ type: "I", x: centers[5].x, y: centers[5].y }); // mission item deep
+  area.startPos = { x: centers[0].x, y: centers[0].y };
+  area.objects.push({ type: "X", x: centers[0].x + 1, y: centers[0].y + 1 }); // return point
+  area.objects.push({ type: "V", x: centers[5].x, y: centers[5].y }); // vortex
 
-  const healSpots = [centers[2], centers[3], centers[4]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
+  const healSpots = [centers[2], centers[3]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
   area.items.push(...healSpots);
+  const fishSpots = [centers[1], centers[4], centers[5], { x: 24, y: 18 }].map((c, i) => ({
+    type: i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL",
+    x: c.x + (i % 2),
+    y: c.y,
+  }));
+  area.items.push(...fishSpots);
 
   const enemySpawns = [
     { pos: centers[1], typeId: "penguin" },
@@ -261,11 +291,11 @@ function makeDungeonFloor() {
     { pos: centers[5], typeId: "penguin" },
     { pos: { x: 25, y: 10 }, typeId: "cheetah" },
   ];
-  enemySpawns.forEach((s) => spawnEnemyOfType(area, s.pos.x, s.pos.y, s.typeId));
+  enemySpawns.forEach((s) => spawnEnemyOfType(area, s.pos.x, s.pos.y, s.typeId, (ENEMY_TYPES[s.typeId].maxHp + depth - 1)));
 
   for (let i = 0; i < gameState.town.level; i++) {
     const s = enemySpawns[i % enemySpawns.length];
-    spawnEnemyOfType(area, s.pos.x + (i % 2), s.pos.y + ((i + 1) % 2), s.typeId);
+    spawnEnemyOfType(area, s.pos.x + (i % 2), s.pos.y + ((i + 1) % 2), s.typeId, (ENEMY_TYPES[s.typeId].maxHp + depth - 1));
   }
 
   return area;
@@ -306,12 +336,14 @@ function startRun() {
   gameState.phase = "playing";
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
+  gameState.player.oxygen = gameState.player.maxOxygen;
+  gameState.player.fishThisRun = 0;
   gameState.player.reviveUsed = false;
   gameState.mission.retrieved = false;
-  gameState.dungeon = { floor: makeDungeonFloor(), hint: "", turn: 1, unstable: false };
+  gameState.dungeon = { floor: makeDungeonFloor(1), hint: "", turn: 1, unstable: false, depth: 1 };
   updateDangerPreview();
   updateHint();
-  addLog("ダンジョンへ向かう。コアを持って帰還しよう。");
+  addLog("潜水開始。魚を集めて帰還しよう。");
 }
 
 function currentArea() {
@@ -366,19 +398,16 @@ function applyInteraction(obj) {
     if (obj.type === "D") startRun();
     if (obj.type === "B") {
       gameState.mission.accepted = true;
-      addLog("依頼板で『コア回収』を受注した。");
+      addLog("依頼板で『魚獲り』を受注した。");
     }
   }
 
   if (gameState.phase === "playing") {
-    if (obj.type === "I" && !gameState.mission.retrieved) {
-      gameState.mission.retrieved = true;
-      gameState.dungeon.unstable = true;
-      addLog("コアを回収した。足場が揺らぐ。");
-    }
     if (obj.type === "X") {
-      if (!gameState.mission.retrieved) addLog("まだコアを見つけていない。");
-      else onWinRun();
+      onReturnRun();
+    }
+    if (obj.type === "V") {
+      descendDepth();
     }
   }
 }
@@ -401,12 +430,35 @@ function pickupIfAny(area) {
   const idx = area.items.findIndex((it) => it.x === p.x && it.y === p.y);
   if (idx >= 0) {
     const it = area.items[idx];
-    if (it.type === "H") {
-      gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 2);
-      addLog("薬草でHPが回復した。");
+    if (it.type === "F_SMALL" || it.type === "F_BIG") {
+      gameState.player.fishThisRun += it.type === "F_BIG" ? 2 : 1;
+      area.items.splice(idx, 1);
+      addLog("魚を捕まえた");
+      return;
     }
+    if (gameState.player.itemSlot) {
+      addLog("持ち物がいっぱいだ。");
+      return;
+    }
+    gameState.player.itemSlot = { type: it.type, emoji: "🌿", name: "薬草" };
     area.items.splice(idx, 1);
+    addLog("アイテムを拾った。");
   }
+}
+
+function useItemSlot() {
+  const item = gameState.player.itemSlot;
+  if (!item) {
+    addLog("アイテムがない。");
+    render();
+    return;
+  }
+  if (item.type === "H") {
+    gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 2);
+    addLog("薬草を使って回復した。");
+  }
+  gameState.player.itemSlot = null;
+  render();
 }
 
 function moveActor(dx, dy) {
@@ -425,9 +477,11 @@ function moveActor(dx, dy) {
   if (gameState.phase === "playing") {
     const enemy = enemyAt(area, nx, ny);
     if (enemy) {
+      const enemyName = getEnemyType(enemy).name;
       enemy.hp -= gameState.player.atk;
-      addLog(`近接攻撃 ${gameState.player.atk}ダメージ`);
-      if (enemy.hp <= 0) addLog("魔物を倒した。");
+      addDamageEffect(enemy.x, enemy.y, `-${gameState.player.atk}`);
+      addLog(`${enemyName}に${gameState.player.atk}ダメージ`);
+      if (enemy.hp <= 0) addLog(`${enemyName}を倒した。`);
       endPlayerTurn();
       return;
     }
@@ -437,6 +491,11 @@ function moveActor(dx, dy) {
   p.y = ny;
 
   if (gameState.phase === "playing") {
+    const stepObj = objectAt(area, nx, ny);
+    if (stepObj?.type === "V") {
+      descendDepth();
+      return;
+    }
     pickupIfAny(area);
     endPlayerTurn();
   }
@@ -459,10 +518,12 @@ function useSpecial() {
     return;
   }
 
+  const enemyName = getEnemyType(target).name;
   gameState.player.pp -= CONFIG.specialCost;
   target.hp -= gameState.player.atk + 1;
-  addLog(`遠隔スキル ${gameState.player.atk + 1}ダメージ`);
-  if (target.hp <= 0) addLog("魔物を倒した。");
+  addDamageEffect(target.x, target.y, `-${gameState.player.atk + 1}`);
+  addLog(`${enemyName}に${gameState.player.atk + 1}ダメージ`);
+  if (target.hp <= 0) addLog(`${enemyName}を倒した。`);
   endPlayerTurn();
 }
 
@@ -570,10 +631,23 @@ function performEnemyTurn(enemy, area, playerPos) {
 }
 
 function endPlayerTurn() {
+  consumeOxygen();
   enemyTurn();
   if (gameState.phase === "playing") gameState.dungeon.turn += 1;
   updateDangerPreview();
   updateHint();
+}
+
+function consumeOxygen() {
+  if (gameState.phase !== "playing") return;
+  const cost = CONFIG.oxygenPerTurn + Math.max(0, gameState.dungeon.depth - 1);
+  gameState.player.oxygen = Math.max(0, gameState.player.oxygen - cost);
+  if (gameState.player.oxygen <= 0) {
+    gameState.phase = "gameover";
+    addLog("酸素が尽きた…");
+  } else if (gameState.player.oxygen <= Math.floor(gameState.player.maxOxygen * 0.25)) {
+    addLog("酸素が減っている");
+  }
 }
 
 function updateDangerPreview() {
@@ -593,13 +667,23 @@ function updateDangerPreview() {
   gameState.dangerPreview = near ? `危険: ${near}体接近` : "安全";
 }
 
-function onWinRun() {
+function onReturnRun() {
   gameState.town.level += 1;
   gameState.town.upgradedVisual = true;
   if (Math.random() < 0.5) gameState.player.maxHp += 1;
   else gameState.player.maxPp += 1;
-  addLog("帰還成功。次は敵が少し増える。");
+  gameState.player.totalFish += gameState.player.fishThisRun;
+  addLog(`帰還成功。魚を${gameState.player.fishThisRun}匹持ち帰った。`);
   startTown();
+}
+
+function descendDepth() {
+  if (gameState.phase !== "playing") return;
+  gameState.dungeon.depth += 1;
+  gameState.dungeon.floor = makeDungeonFloor(gameState.dungeon.depth);
+  addLog("渦に飲まれた。深く潜る");
+  updateDangerPreview();
+  updateHint();
 }
 
 function updateHint() {
@@ -613,7 +697,7 @@ function updateHint() {
     R: "E: 休んで回復",
     D: "E: ダンジョンへ向かう",
     B: "E: 依頼板を見る",
-    I: "E: コア回収",
+    V: "渦: 深く潜る",
     X: "E: 帰還する",
   };
 
@@ -682,15 +766,16 @@ function tileVisual(area, x, y) {
   const it = itemAt(area, x, y);
   if (it) {
     if (it.type === "H") return { type: "heal", symbol: "🌿" };
+    if (it.type === "F_SMALL") return { type: "item", symbol: "🐟" };
+    if (it.type === "F_BIG") return { type: "item", symbol: "🐠" };
   }
 
   const obj = objectAt(area, x, y);
   if (obj) {
-    if (obj.type === "I" && gameState.mission.retrieved) return { type: "floor", symbol: "·" };
-    const map = { I: "item", X: "stairs", T: "train", R: "rest", D: "gate", B: "board" };
+    const map = { V: "stairs", X: "stairs", T: "train", R: "rest", D: "gate", B: "board" };
     const symbols = {
-      I: "💎",
       X: "🚪",
+      V: "🌀",
       T: "🏋️",
       R: "🍖",
       D: "🕳️",
@@ -712,7 +797,16 @@ function renderArea(area, title, hint) {
       const vis = tileVisual(area, x, y);
       const sprite = spriteForTile(vis.type, vis.symbol);
       const flipClass = vis.facing === -1 ? "flip-x" : "";
-      html += `<div class="tile" style="background-image:url('${sprite.src}')"><span class="${flipClass}">${vis.symbol}</span></div>`;
+      let tip = "";
+      if (vis.type === "enemy") {
+        const enemy = enemyAt(area, x, y);
+        if (enemy) {
+          const t = getEnemyType(enemy);
+          tip = ` title="${t.name} HP ${enemy.hp} / ATK ${t.attack}"`;
+        }
+      }
+      const playerTileClass = vis.type === "player" ? " player-tile" : "";
+      html += `<div class="tile${playerTileClass}" style="background-image:url('${sprite.src}')"${tip}><span class="${flipClass} sym-${vis.type}">${vis.symbol}</span></div>`;
     }
   }
 
@@ -720,6 +814,12 @@ function renderArea(area, title, hint) {
   if (gameState.phase === "playing") {
     const projectiles = gameState.ui.effects
       .map((e) => {
+        if (e.kind === "damage") {
+          const dx = e.x - cam.x0;
+          const dy = e.y - cam.y0;
+          if (dx < 0 || dy < 0 || dx >= cam.w || dy >= cam.h) return "";
+          return `<div class="damage-float" style="--dx:${dx};--dy:${dy};">${e.text}</div>`;
+        }
         const sx = e.fromX - cam.x0;
         const sy = e.fromY - cam.y0;
         const tx = e.toX - cam.x0;
@@ -731,7 +831,10 @@ function renderArea(area, title, hint) {
     html += `<div class="projectile-layer">${projectiles}</div>`;
   }
   html += `</div>`;
-  html += `<div class="hint-overlay">${hint || ""}</div>`;
+  const slot = gameState.player.itemSlot;
+  html += `<div class="item-slot-panel"><button id="item-slot-btn" class="item-slot-btn" title="アイテムを使う">${
+    slot ? `${slot.emoji} ${slot.name}` : "（空）"
+  }</button></div>`;
   html += `<p class="meta">座標: (${area.playerPos.x},${area.playerPos.y})</p>`;
   html += `</div>`;
   return html;
@@ -739,13 +842,19 @@ function renderArea(area, title, hint) {
 
 function renderHudBar() {
   const hpRatio = Math.max(0, Math.min(1, gameState.player.hp / gameState.player.maxHp));
-  const floorLabel = gameState.phase === "playing" ? "1F" : "村";
+  const oxyRatio = Math.max(0, Math.min(1, gameState.player.oxygen / gameState.player.maxOxygen));
+  const floorLabel = gameState.phase === "playing" ? `${gameState.dungeon?.depth || 1}F` : "村";
+  const hpState = hpRatio > 0.6 ? "safe" : hpRatio > 0.3 ? "mid" : "low";
   hudEl.innerHTML = `
     <div class="hud-bar">
       <span class="hud-floor">${floorLabel}</span>
       <div class="hp-wrap">
-        <div class="hp-bar"><div class="hp-fill" style="width:${Math.round(hpRatio * 100)}%"></div></div>
+        <div class="hp-bar"><div class="hp-fill ${hpState}" style="width:${Math.round(hpRatio * 100)}%"></div></div>
         <span class="hud-hp">${gameState.player.hp}/${gameState.player.maxHp}</span>
+      </div>
+      <div class="oxy-wrap">
+        <div class="oxy-bar"><div class="oxy-fill" style="width:${Math.round(oxyRatio * 100)}%"></div></div>
+        <span class="hud-oxy">${gameState.player.oxygen}/${gameState.player.maxOxygen}</span>
       </div>
       <span class="hud-pp">PP ${gameState.player.pp}/${gameState.player.maxPp}</span>
     </div>
@@ -753,7 +862,13 @@ function renderHudBar() {
 }
 
 function renderMessageBox() {
-  logEl.innerHTML = `<div class="message-fixed">${gameState.ui.message || "..."}</div>`;
+  const [latest = "...", older = ""] = gameState.ui.messages;
+  const hint = gameState.phase === "playing" ? gameState.dungeon?.hint : gameState.town?.hint;
+  logEl.innerHTML = `
+    <div class="message-fixed latest">${latest}</div>
+    <div class="message-fixed older">${older}</div>
+    <div class="hint-line">${hint || ""}</div>
+  `;
 }
 
 function render() {
@@ -761,7 +876,7 @@ function render() {
 
   if (gameState.phase === "start") {
     viewEl.className = "";
-    viewEl.innerHTML = `<div class="field-shell"><h2>開始</h2><p>村で準備を整え、ダンジョンでコアを探そう。</p></div>`;
+    viewEl.innerHTML = `<div class="field-shell"><h2>開始</h2><p>村で準備を整え、海へ潜って魚を持ち帰ろう。</p></div>`;
     controlsEl.innerHTML = `<div class='controls-row'><button data-action='START_GAME'>ゲーム開始</button></div>`;
   }
 
@@ -773,7 +888,7 @@ function render() {
 
   if (gameState.phase === "playing") {
     viewEl.className = gameState.dungeon.unstable ? "floor-unstable" : "";
-    viewEl.innerHTML = renderArea(gameState.dungeon.floor, "ダンジョン", gameState.dungeon.hint);
+    viewEl.innerHTML = renderArea(gameState.dungeon.floor, "海底", gameState.dungeon.hint);
     controlsEl.innerHTML = `
       <div class='controls-row'>
         <button data-action='INTERACT'>E: 調べる</button>
@@ -795,6 +910,12 @@ controlsEl.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-action]");
   if (!btn) return;
   update(btn.dataset.action);
+});
+
+document.addEventListener("click", (e) => {
+  const slotBtn = e.target.closest("#item-slot-btn");
+  if (!slotBtn) return;
+  useItemSlot();
 });
 
 window.addEventListener("keydown", (e) => {
