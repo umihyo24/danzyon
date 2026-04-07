@@ -78,6 +78,18 @@ h1 {
   background: #635317;
 }
 
+.train {
+  background: #355f2f;
+}
+
+.rest {
+  background: #2f5f5f;
+}
+
+.gate {
+  background: #5a3d1f;
+}
+
 .enemy {
   outline: 2px solid #ff7979;
 }
