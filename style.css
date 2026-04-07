@@ -1,0 +1,130 @@
+:root {
+  color-scheme: dark;
+  --bg: #18151f;
+  --panel: #272233;
+  --town: #304a3f;
+  --text: #f8f6ff;
+  --accent: #b4f58f;
+  --danger: #ff9595;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #2c2340 0%, var(--bg) 60%);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+h1 {
+  margin-top: 0;
+}
+
+#hud,
+#view,
+#controls,
+#log {
+  background: var(--panel);
+  border: 1px solid #4a4263;
+  border-radius: 10px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+#view.town-upgraded {
+  background: linear-gradient(90deg, #2e434f, var(--town));
+  border-color: #8ee09e;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, 42px);
+  gap: 4px;
+  justify-content: start;
+}
+
+.tile {
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  background: #3b3552;
+}
+
+.wall {
+  background: #100f16;
+}
+
+.floor {
+  background: #3a344e;
+}
+
+.exit {
+  background: #244863;
+}
+
+.item {
+  background: #635317;
+}
+
+.train {
+  background: #355f2f;
+}
+
+.rest {
+  background: #2f5f5f;
+}
+
+.gate {
+  background: #5a3d1f;
+}
+
+.enemy {
+  outline: 2px solid #ff7979;
+}
+
+.player {
+  outline: 2px solid #a6ff77;
+}
+
+.controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+button {
+  border: 1px solid #8274ae;
+  border-radius: 8px;
+  background: #3a3152;
+  color: var(--text);
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #4b3f68;
+}
+
+.warn {
+  color: var(--danger);
+}
+
+.ok {
+  color: var(--accent);
+}
+
+#log {
+  min-height: 54px;
+}
