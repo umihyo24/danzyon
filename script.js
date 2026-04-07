@@ -11,13 +11,12 @@ const CONFIG = {
   reviveHp: 2,
   logLimit: 6,
   lungCapacity: 10,
-  inventorySlots: 10,
+  inventorySlots: 12,
   fishUpgradeBase: 8,
   levelUpHpGain: 1,
   levelUpAtkEvery: 3,
   expBaseNext: 5,
   autoTurnMs: 260,
-  fovRadius: 4,
   pressureEveryTurns: 8,
 };
 
@@ -826,6 +825,7 @@ function isLineBlockedByWall(area, enemy, playerPos) {
 function canUsePenguinRanged(enemy, area, playerPos) {
   const type = getEnemyType(enemy);
   if (type.id !== "penguin") return false;
+  if (roomIndexAt(area, enemy.x, enemy.y) < 0) return false;
   if (!isStraightLineWithin(enemy, playerPos, type.range)) return false;
   return !isLineBlockedByWall(area, enemy, playerPos);
 }
@@ -1014,17 +1014,41 @@ function updateFov() {
   const area = currentArea();
   const p = area.playerPos;
   const visible = {};
-  for (let y = p.y - CONFIG.fovRadius; y <= p.y + CONFIG.fovRadius; y++) {
-    for (let x = p.x - CONFIG.fovRadius; x <= p.x + CONFIG.fovRadius; x++) {
-      if (!inBounds(area, x, y)) continue;
-      const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
-      if (dist > CONFIG.fovRadius) continue;
-      const key = tileKey(x, y);
-      visible[key] = true;
-      gameState.dungeon.discovered[key] = true;
+  const inRoomIndex = roomIndexAt(area, p.x, p.y);
+  if (inRoomIndex >= 0) {
+    const room = area.rooms[inRoomIndex];
+    for (let y = room.y; y < room.y + room.h; y++) {
+      for (let x = room.x; x < room.x + room.w; x++) {
+        const key = tileKey(x, y);
+        visible[key] = true;
+        gameState.dungeon.discovered[key] = true;
+      }
+    }
+  } else {
+    for (let y = p.y - 2; y <= p.y + 2; y++) {
+      for (let x = p.x - 2; x <= p.x + 2; x++) {
+        if (!inBounds(area, x, y)) continue;
+        const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
+        if (dist > 2) continue;
+        const key = tileKey(x, y);
+        visible[key] = true;
+        gameState.dungeon.discovered[key] = true;
+      }
     }
   }
   gameState.dungeon.visible = visible;
+}
+
+function isEnemyVisibleAt(area, x, y) {
+  if (gameState.phase !== "playing") return true;
+  if (!isVisible(x, y)) return false;
+  const p = area.playerPos;
+  const playerRoomIndex = roomIndexAt(area, p.x, p.y);
+  if (playerRoomIndex >= 0) {
+    const enemyRoomIndex = roomIndexAt(area, x, y);
+    if (enemyRoomIndex === playerRoomIndex) return true;
+  }
+  return distance(p, { x, y }) <= 1;
 }
 
 function findNearest(area, from, list) {
@@ -1267,7 +1291,7 @@ function tileVisual(area, x, y) {
   const p = area.playerPos;
   if (p.x === x && p.y === y) return { type: "player", symbol: "🦭", facing: gameState.player.facing };
 
-  const e = enemyAt(area, x, y);
+  const e = isEnemyVisibleAt(area, x, y) ? enemyAt(area, x, y) : null;
   if (e) return { type: "enemy", symbol: getEnemyType(e).emoji, facing: e.facing || -1 };
 
   const it = itemAt(area, x, y);
@@ -1321,15 +1345,15 @@ function renderRightPanel() {
   const slotsHtml = gameState.player.inventory
     .map(
       (slot, idx) =>
-        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う">${slot ? slot.emoji : "・"}</button>`
+        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う"><span class="item-icon">${slot ? slot.emoji : "・"}</span><span class="item-name">${slot ? slot.name : "空き"}</span></button>`
     )
     .join("");
-  return `<aside class="side-panel right-panel"><div class="slot-grid">${slotsHtml}</div></aside>`;
+  return `<aside class="side-panel right-panel"><div class="slot-list">${slotsHtml}</div></aside>`;
 }
 
 function renderBoard(area, cam) {
   gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
-  const focusEnemy = findNearest(area, area.playerPos, area.enemies.filter((e) => e.hp > 0));
+  const focusEnemy = findNearest(area, area.playerPos, area.enemies.filter((e) => e.hp > 0 && isEnemyVisibleAt(area, e.x, e.y)));
   let html = `<div class="board-pane"><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
 
   for (let y = cam.y0; y < cam.y0 + cam.h; y++) {
@@ -1348,7 +1372,7 @@ function renderBoard(area, cam) {
       const playerTileClass = vis.type === "player" ? " player-tile" : "";
       const visibilityClass = isVisible(x, y) ? " tile-visible" : " tile-memory";
       const hiddenClass = vis.type === "hidden" ? " tile-hidden" : "";
-      const enemyHere = enemyAt(area, x, y);
+      const enemyHere = isEnemyVisibleAt(area, x, y) ? enemyAt(area, x, y) : null;
       const objHere = objectAt(area, x, y);
       const itemHere = itemAt(area, x, y);
       const focusClass = focusEnemy && focusEnemy.x === x && focusEnemy.y === y ? " tile-focus" : "";
@@ -1540,7 +1564,7 @@ viewEl.addEventListener("mousemove", (e) => {
   }
   const x = Number(tile.dataset.mapX);
   const y = Number(tile.dataset.mapY);
-  const enemy = enemyAt(gameState.dungeon.floor, x, y);
+  const enemy = isEnemyVisibleAt(gameState.dungeon.floor, x, y) ? enemyAt(gameState.dungeon.floor, x, y) : null;
   if (!enemy) {
     if (gameState.ui.hoverEnemy) {
       gameState.ui.hoverEnemy = null;

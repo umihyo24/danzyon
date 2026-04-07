@@ -150,7 +150,7 @@ body {
 
 .battle-layout {
   display: grid;
-  grid-template-columns: 190px auto 130px;
+  grid-template-columns: 190px auto 200px;
   gap: 10px;
   align-items: start;
   justify-content: center;
@@ -212,21 +212,38 @@ body {
   display: none;
 }
 
-.slot-grid {
+.slot-list {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: 6px;
 }
 
 .item-slot-btn {
   width: 100%;
-  min-height: 38px;
+  min-height: 28px;
+  padding: 4px 8px;
   border: 1px solid #8e84b4;
   border-radius: 8px;
   background: rgba(20, 17, 30, 0.9);
   color: #fff;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  text-align: left;
+}
+
+.item-icon {
+  width: 1.2rem;
+  text-align: center;
+}
+
+.item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .enemy-info-panel {
@@ -468,7 +485,7 @@ button:hover { background: #4b3f68; }
 
 @media (max-width: 980px) {
   .battle-layout {
-    grid-template-columns: 150px auto 110px;
+    grid-template-columns: 150px auto 170px;
     gap: 6px;
   }
   .mini-dot {
