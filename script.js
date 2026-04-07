@@ -34,16 +34,19 @@ const DIRS = {
   ArrowRight: { x: 1, y: 0 },
 };
 
-const MONSTER_EMOJIS = ["🦬", "🦏", "🦛", "🐫", "🦣", "🐁", "🐊", "🦕", "🦈", "🐳", "🦐", "🦑", "🦞", "🐧", "🦚", "🐜", "🪳", "🐝", "🐞", "🤺", "🦇", "🐣", "🐎", "🐆", "🐩", "🐈"];
+const ENEMY_TYPES = {
+  penguin: { id: "penguin", name: "ペンギン", emoji: "🐧", maxHp: 2, attack: 1, behavior: "ranged", range: 5 },
+  cheetah: { id: "cheetah", name: "チーター", emoji: "🐆", maxHp: 3, attack: 1, behavior: "fast", speed: 2 },
+  elephant: { id: "elephant", name: "ゾウ", emoji: "🦣", maxHp: 6, attack: 1, behavior: "slow", actEvery: 2 },
+  hippo: { id: "hippo", name: "カバ", emoji: "🦛", maxHp: 4, attack: 2, behavior: "heavy" },
+};
 
 const gameState = {
   phase: "start", // start | town | playing | gameover
   assets: { images: {}, loaded: false },
   ui: {
-    statusOpen: false,
-    message: "",
-    messageVisible: false,
-    messageTimer: null,
+    message: "ようこそ。",
+    effects: [],
   },
   town: {
     level: 0,
@@ -76,12 +79,22 @@ const logEl = document.querySelector("#log");
 
 function addLog(msg) {
   gameState.ui.message = msg;
-  gameState.ui.messageVisible = true;
-  if (gameState.ui.messageTimer) clearTimeout(gameState.ui.messageTimer);
-  gameState.ui.messageTimer = setTimeout(() => {
-    gameState.ui.messageVisible = false;
+}
+
+function addProjectileEffect(fromX, fromY, toX, toY, emoji = "🧊") {
+  gameState.ui.effects.push({
+    id: Date.now() + Math.random(),
+    fromX,
+    fromY,
+    toX,
+    toY,
+    emoji,
+    expiresAt: Date.now() + 420,
+  });
+  setTimeout(() => {
+    gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
     render();
-  }, 1800);
+  }, 430);
 }
 
 function makePlaceholder(char, bg) {
@@ -190,11 +203,17 @@ function canSpawnEnemy(area, x, y) {
 }
 
 function spawnEnemySafe(area, x, y, hp) {
+  const defaultType = "hippo";
+  return spawnEnemyOfType(area, x, y, defaultType, hp);
+}
+
+function spawnEnemyOfType(area, x, y, typeId, hpOverride = null) {
   const pos = nearestFloorTile(area, x, y);
   if (!pos) return;
-  const emoji = MONSTER_EMOJIS[area.enemies.length % MONSTER_EMOJIS.length];
+  const type = ENEMY_TYPES[typeId] || ENEMY_TYPES.hippo;
+  const hp = hpOverride ?? type.maxHp;
   if (canSpawnEnemy(area, pos.x, pos.y)) {
-    area.enemies.push({ x: pos.x, y: pos.y, hp, emoji, facing: Math.random() < 0.5 ? -1 : 1 });
+    area.enemies.push({ typeId: type.id, x: pos.x, y: pos.y, hp, facing: Math.random() < 0.5 ? -1 : 1, turnCounter: 0 });
     return;
   }
   for (let r = 1; r < 8; r++) {
@@ -202,7 +221,7 @@ function spawnEnemySafe(area, x, y, hp) {
       for (let xx = pos.x - r; xx <= pos.x + r; xx++) {
         if (!inBounds(area, xx, yy)) continue;
         if (canSpawnEnemy(area, xx, yy)) {
-          area.enemies.push({ x: xx, y: yy, hp, emoji, facing: Math.random() < 0.5 ? -1 : 1 });
+          area.enemies.push({ typeId: type.id, x: xx, y: yy, hp, facing: Math.random() < 0.5 ? -1 : 1, turnCounter: 0 });
           return;
         }
       }
@@ -234,12 +253,19 @@ function makeDungeonFloor() {
   const healSpots = [centers[2], centers[3], centers[4]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
   area.items.push(...healSpots);
 
-  const enemySpawns = [centers[1], centers[2], centers[3], centers[4], centers[5], { x: 25, y: 10 }];
-  enemySpawns.forEach((s) => spawnEnemySafe(area, s.x, s.y, CONFIG.baseEnemyHp + gameState.town.level));
+  const enemySpawns = [
+    { pos: centers[1], typeId: "penguin" },
+    { pos: centers[2], typeId: "cheetah" },
+    { pos: centers[3], typeId: "elephant" },
+    { pos: centers[4], typeId: "hippo" },
+    { pos: centers[5], typeId: "penguin" },
+    { pos: { x: 25, y: 10 }, typeId: "cheetah" },
+  ];
+  enemySpawns.forEach((s) => spawnEnemyOfType(area, s.pos.x, s.pos.y, s.typeId));
 
   for (let i = 0; i < gameState.town.level; i++) {
     const s = enemySpawns[i % enemySpawns.length];
-    spawnEnemySafe(area, s.x + (i % 2), s.y + ((i + 1) % 2), CONFIG.baseEnemyHp + gameState.town.level);
+    spawnEnemyOfType(area, s.pos.x + (i % 2), s.pos.y + ((i + 1) % 2), s.typeId);
   }
 
   return area;
@@ -317,6 +343,10 @@ function enemyAt(area, x, y) {
 
 function distance(a, b) {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+function getEnemyType(enemy) {
+  return ENEMY_TYPES[enemy.typeId] || ENEMY_TYPES.hippo;
 }
 
 function applyInteraction(obj) {
@@ -443,31 +473,7 @@ function enemyTurn() {
   const active = area.enemies.filter((e) => e.hp > 0);
   area.enemies = active;
 
-  area.enemies.forEach((enemy) => {
-    if (distance(enemy, p) === 1) {
-      gameState.player.hp -= CONFIG.enemyAttack;
-      addLog(`魔物の攻撃で${CONFIG.enemyAttack}ダメージ`);
-      return;
-    }
-
-    const candidates = [
-      { x: enemy.x + Math.sign(p.x - enemy.x), y: enemy.y },
-      { x: enemy.x, y: enemy.y + Math.sign(p.y - enemy.y) },
-    ];
-    const next = candidates.find(
-      (c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y) && !(c.x === p.x && c.y === p.y)
-    );
-    if (next) {
-      if (next.x !== enemy.x) enemy.facing = next.x < enemy.x ? -1 : 1;
-      enemy.x = next.x;
-      enemy.y = next.y;
-    }
-
-    if (distance(enemy, p) === 1) {
-      gameState.player.hp -= CONFIG.enemyAttack;
-      addLog(`魔物が接近攻撃: ${CONFIG.enemyAttack}ダメージ`);
-    }
-  });
+  area.enemies.forEach((enemy) => performEnemyTurn(enemy, area, p));
 
   if (gameState.player.hp <= 0) {
     if (!gameState.player.reviveUsed) {
@@ -479,6 +485,88 @@ function enemyTurn() {
     gameState.phase = "gameover";
     addLog("力尽きた…。");
   }
+}
+
+function applyEnemyAttack(enemy, damage, text = null) {
+  gameState.player.hp -= damage;
+  addLog(text || `${getEnemyType(enemy).name}の攻撃で${damage}ダメージ`);
+}
+
+function moveEnemyTowardPlayer(enemy, area, playerPos) {
+  const options = [
+    { x: enemy.x + Math.sign(playerPos.x - enemy.x), y: enemy.y },
+    { x: enemy.x, y: enemy.y + Math.sign(playerPos.y - enemy.y) },
+  ];
+  const next = options.find(
+    (c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y) && !(c.x === playerPos.x && c.y === playerPos.y)
+  );
+  if (!next) return false;
+  if (next.x !== enemy.x) enemy.facing = next.x < enemy.x ? -1 : 1;
+  enemy.x = next.x;
+  enemy.y = next.y;
+  return true;
+}
+
+function isStraightLineWithin(enemy, playerPos, range) {
+  return (enemy.x === playerPos.x || enemy.y === playerPos.y) && distance(enemy, playerPos) <= range;
+}
+
+function isLineBlockedByWall(area, enemy, playerPos) {
+  if (enemy.x === playerPos.x) {
+    const minY = Math.min(enemy.y, playerPos.y);
+    const maxY = Math.max(enemy.y, playerPos.y);
+    for (let y = minY + 1; y < maxY; y++) if (tileAt(area, enemy.x, y) === "wall") return true;
+  }
+  if (enemy.y === playerPos.y) {
+    const minX = Math.min(enemy.x, playerPos.x);
+    const maxX = Math.max(enemy.x, playerPos.x);
+    for (let x = minX + 1; x < maxX; x++) if (tileAt(area, x, enemy.y) === "wall") return true;
+  }
+  return false;
+}
+
+function canUsePenguinRanged(enemy, area, playerPos) {
+  const type = getEnemyType(enemy);
+  if (type.id !== "penguin") return false;
+  if (!isStraightLineWithin(enemy, playerPos, type.range)) return false;
+  return !isLineBlockedByWall(area, enemy, playerPos);
+}
+
+function performEnemyTurn(enemy, area, playerPos) {
+  const type = getEnemyType(enemy);
+  enemy.turnCounter = (enemy.turnCounter || 0) + 1;
+
+  if (type.behavior === "slow" && enemy.turnCounter % type.actEvery !== 0) return;
+
+  if (type.behavior === "ranged") {
+    moveEnemyTowardPlayer(enemy, area, playerPos);
+    if (canUsePenguinRanged(enemy, area, playerPos)) {
+      addProjectileEffect(enemy.x, enemy.y, playerPos.x, playerPos.y, "🧊");
+      applyEnemyAttack(enemy, type.attack, `${type.name}の氷つぶてで${type.attack}ダメージ`);
+      return;
+    }
+    if (distance(enemy, playerPos) === 1) applyEnemyAttack(enemy, type.attack);
+    return;
+  }
+
+  if (type.behavior === "fast") {
+    let attacked = false;
+    if (distance(enemy, playerPos) === 1) {
+      applyEnemyAttack(enemy, type.attack);
+      return;
+    }
+    moveEnemyTowardPlayer(enemy, area, playerPos);
+    if (distance(enemy, playerPos) === 1 && !attacked) {
+      applyEnemyAttack(enemy, type.attack, `${type.name}の素早い一撃で${type.attack}ダメージ`);
+      attacked = true;
+    }
+    if (!attacked && distance(enemy, playerPos) > 1) moveEnemyTowardPlayer(enemy, area, playerPos);
+    if (!attacked && distance(enemy, playerPos) === 1) applyEnemyAttack(enemy, type.attack, `${type.name}の一撃で${type.attack}ダメージ`);
+    return;
+  }
+
+  moveEnemyTowardPlayer(enemy, area, playerPos);
+  if (distance(enemy, playerPos) === 1) applyEnemyAttack(enemy, type.attack);
 }
 
 function endPlayerTurn() {
@@ -495,7 +583,13 @@ function updateDangerPreview() {
   }
   const area = currentArea();
   const p = area.playerPos;
-  const near = area.enemies.filter((e) => e.hp > 0 && distance(e, p) <= CONFIG.dangerRadius).length;
+  const near = area.enemies.filter((e) => {
+    if (e.hp <= 0) return false;
+    const type = getEnemyType(e);
+    if (distance(e, p) === 1) return true;
+    if (type.id === "penguin" && canUsePenguinRanged(e, area, p)) return true;
+    return distance(e, p) <= CONFIG.dangerRadius;
+  }).length;
   gameState.dangerPreview = near ? `危険: ${near}体接近` : "安全";
 }
 
@@ -583,7 +677,7 @@ function tileVisual(area, x, y) {
   if (p.x === x && p.y === y) return { type: "player", symbol: "🦭", facing: gameState.player.facing };
 
   const e = enemyAt(area, x, y);
-  if (e) return { type: "enemy", symbol: e.emoji || "🦬", facing: e.facing || 1 };
+  if (e) return { type: "enemy", symbol: getEnemyType(e).emoji, facing: e.facing || 1 };
 
   const it = itemAt(area, x, y);
   if (it) {
@@ -610,7 +704,8 @@ function tileVisual(area, x, y) {
 
 function renderArea(area, title, hint) {
   const cam = cameraFor(area);
-  let html = `<div class="field-shell"><h2>${title}</h2><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
+  gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
+  let html = `<div class="field-shell"><h2>${title}</h2><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
 
   for (let y = cam.y0; y < cam.y0 + cam.h; y++) {
     for (let x = cam.x0; x < cam.x0 + cam.w; x++) {
@@ -622,36 +717,47 @@ function renderArea(area, title, hint) {
   }
 
   html += `</div>`;
+  if (gameState.phase === "playing") {
+    const projectiles = gameState.ui.effects
+      .map((e) => {
+        const sx = e.fromX - cam.x0;
+        const sy = e.fromY - cam.y0;
+        const tx = e.toX - cam.x0;
+        const ty = e.toY - cam.y0;
+        if (sx < 0 || sy < 0 || tx < 0 || ty < 0 || sx >= cam.w || tx >= cam.w || sy >= cam.h || ty >= cam.h) return "";
+        return `<div class="projectile" style="--sx:${sx};--sy:${sy};--tx:${tx};--ty:${ty};">${e.emoji}</div>`;
+      })
+      .join("");
+    html += `<div class="projectile-layer">${projectiles}</div>`;
+  }
+  html += `</div>`;
   html += `<div class="hint-overlay">${hint || ""}</div>`;
   html += `<p class="meta">座標: (${area.playerPos.x},${area.playerPos.y})</p>`;
   html += `</div>`;
   return html;
 }
 
-function renderStatusOverlay() {
-  if (!gameState.ui.statusOpen) return "";
-  return `
-    <div class="status-modal">
-      <h3>ステータス</h3>
-      <p>HP ${gameState.player.hp}/${gameState.player.maxHp}</p>
-      <p>ATK ${gameState.player.atk}</p>
-      <p>PP ${gameState.player.pp}/${gameState.player.maxPp}</p>
-      <p>任務: ${gameState.mission.targetItemName} ${gameState.mission.retrieved ? "回収済み" : "未回収"}</p>
-      <p>任務受注: ${gameState.mission.accepted ? "済み" : "未"}</p>
-      <p>村レベル: ${gameState.town.level}</p>
-      <p>復活: ${gameState.player.reviveUsed ? "使用済み" : "未使用"}</p>
-      <p class="meta">Escで閉じる</p>
+function renderHudBar() {
+  const hpRatio = Math.max(0, Math.min(1, gameState.player.hp / gameState.player.maxHp));
+  const floorLabel = gameState.phase === "playing" ? "1F" : "村";
+  hudEl.innerHTML = `
+    <div class="hud-bar">
+      <span class="hud-floor">${floorLabel}</span>
+      <div class="hp-wrap">
+        <div class="hp-bar"><div class="hp-fill" style="width:${Math.round(hpRatio * 100)}%"></div></div>
+        <span class="hud-hp">${gameState.player.hp}/${gameState.player.maxHp}</span>
+      </div>
+      <span class="hud-pp">PP ${gameState.player.pp}/${gameState.player.maxPp}</span>
     </div>
   `;
 }
 
-function renderMessageOverlay() {
-  if (!gameState.ui.messageVisible) return "";
-  return `<div class="message-popup">${gameState.ui.message}</div>`;
+function renderMessageBox() {
+  logEl.innerHTML = `<div class="message-fixed">${gameState.ui.message || "..."}</div>`;
 }
 
 function render() {
-  hudEl.innerHTML = "";
+  renderHudBar();
 
   if (gameState.phase === "start") {
     viewEl.className = "";
@@ -682,9 +788,7 @@ function render() {
     controlsEl.innerHTML = `<div class='controls-row'><button data-action='RESTART'>町へ戻る</button></div>`;
   }
 
-  logEl.innerHTML = "";
-  viewEl.innerHTML += renderMessageOverlay();
-  viewEl.innerHTML += renderStatusOverlay();
+  renderMessageBox();
 }
 
 controlsEl.addEventListener("click", (e) => {
@@ -701,11 +805,6 @@ window.addEventListener("keydown", (e) => {
   if ((e.key === "e" || e.key === "E") && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
     update("INTERACT");
-  }
-  if (e.key === "Escape") {
-    e.preventDefault();
-    gameState.ui.statusOpen = !gameState.ui.statusOpen;
-    render();
   }
 });
 
