@@ -52,13 +52,13 @@ const gameState = {
     reviveUsed: false,
   },
   mission: {
-    targetItemName: "古代のコア",
+    targetItemName: "コアデータ",
     retrieved: false,
     accepted: false,
   },
   dungeon: null,
   dangerPreview: "-",
-  logs: ["開始: 町でEキーを使って準備しよう。"],
+  logs: ["開始: 自然の村で準備しよう（ローカルシステム）。"],
 };
 
 const hudEl = document.querySelector("#hud");
@@ -219,7 +219,7 @@ function startTown() {
 
 function startRun() {
   if (!gameState.mission.accepted) {
-    addLog("掲示板で任務を受注してから出発しよう。");
+    addLog("依頼板で任務を受注してから接続しよう。");
     return;
   }
   gameState.phase = "playing";
@@ -227,10 +227,10 @@ function startRun() {
   gameState.player.pp = gameState.player.maxPp;
   gameState.player.reviveUsed = false;
   gameState.mission.retrieved = false;
-  gameState.dungeon = { floor: makeDungeonFloor(), hint: "", turn: 1 };
+  gameState.dungeon = { floor: makeDungeonFloor(), hint: "", turn: 1, unstable: false };
   updateDangerPreview();
   updateHint();
-  addLog("連続フロア探索開始。コアを回収して脱出地点(X)へ戻れ。" );
+  addLog("ネットワーク空間へ接続。コアデータを回収して帰還ポイント(X)へ。");
 }
 
 function currentArea() {
@@ -271,27 +271,28 @@ function applyInteraction(obj) {
     if (obj.type === "T") {
       gameState.player.maxHp += 1;
       gameState.player.hp = gameState.player.maxHp;
-      addLog("訓練: 最大HP+1");
+      addLog("動作最適化を実施（見た目は鍛錬）: 最大HP+1");
     }
     if (obj.type === "R") {
       gameState.player.hp = gameState.player.maxHp;
       gameState.player.pp = gameState.player.maxPp;
-      addLog("休息: HP/PPを回復");
+      addLog("エネルギーを補充した（リソース回復）");
     }
     if (obj.type === "D") startRun();
     if (obj.type === "B") {
       gameState.mission.accepted = true;
-      addLog("掲示板: 任務『古代のコア回収』を受注。");
+      addLog("依頼板: 任務『コアデータ回収』を受注。");
     }
   }
 
   if (gameState.phase === "playing") {
     if (obj.type === "I" && !gameState.mission.retrieved) {
       gameState.mission.retrieved = true;
-      addLog("古代のコアを回収！脱出地点(X)へ戻れ。");
+      gameState.dungeon.unstable = true;
+      addLog("コアデータを回収！Connection unstable... 帰還ポイント(X)へ戻れ。");
     }
     if (obj.type === "X") {
-      if (!gameState.mission.retrieved) addLog("コア未回収。奥を探索しよう。");
+      if (!gameState.mission.retrieved) addLog("コアデータ未回収。異常セクタを探索しよう。");
       else onWinRun();
     }
   }
@@ -317,7 +318,7 @@ function pickupIfAny(area) {
     const it = area.items[idx];
     if (it.type === "H") {
       gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 2);
-      addLog("回復アイテムでHP+2");
+      addLog("補給データを取り込みHP+2");
     }
     area.items.splice(idx, 1);
   }
@@ -340,7 +341,7 @@ function moveActor(dx, dy) {
     if (enemy) {
       enemy.hp -= gameState.player.atk;
       addLog(`近接攻撃: ${gameState.player.atk}ダメージ`);
-      if (enemy.hp <= 0) addLog("敵を撃破。");
+      if (enemy.hp <= 0) addLog("異常存在を除去した。");
       endPlayerTurn();
       return;
     }
@@ -368,14 +369,14 @@ function useSpecial() {
   const p = area.playerPos;
   const target = area.enemies.filter((e) => e.hp > 0).sort((a, b) => distance(a, p) - distance(b, p))[0];
   if (!target || distance(target, p) > CONFIG.specialRange) {
-    addLog("射程内に敵がいない。");
+    addLog("射程内に異常存在がいない。");
     return;
   }
 
   gameState.player.pp -= CONFIG.specialCost;
   target.hp -= gameState.player.atk + 1;
   addLog(`遠隔スキル: ${gameState.player.atk + 1}ダメージ (PP-${CONFIG.specialCost})`);
-  if (target.hp <= 0) addLog("敵を撃破。");
+  if (target.hp <= 0) addLog("異常存在を除去した。");
   endPlayerTurn();
 }
 
@@ -389,7 +390,7 @@ function enemyTurn() {
   area.enemies.forEach((enemy) => {
     if (distance(enemy, p) === 1) {
       gameState.player.hp -= CONFIG.enemyAttack;
-      addLog(`敵の攻撃で${CONFIG.enemyAttack}ダメージ`);
+      addLog(`異常な存在が接近（ウイルス）: ${CONFIG.enemyAttack}ダメージ`);
       return;
     }
 
@@ -407,7 +408,7 @@ function enemyTurn() {
 
     if (distance(enemy, p) === 1) {
       gameState.player.hp -= CONFIG.enemyAttack;
-      addLog(`敵が接近攻撃: ${CONFIG.enemyAttack}ダメージ`);
+      addLog(`破損データが接近攻撃: ${CONFIG.enemyAttack}ダメージ`);
     }
   });
 
@@ -438,7 +439,7 @@ function updateDangerPreview() {
   const area = currentArea();
   const p = area.playerPos;
   const near = area.enemies.filter((e) => e.hp > 0 && distance(e, p) <= CONFIG.dangerRadius).length;
-  gameState.dangerPreview = near ? `危険: ${near}体接近` : "安全";
+  gameState.dangerPreview = near ? `危険: ${near}体接近（ウイルス反応）` : "安全";
 }
 
 function onWinRun() {
@@ -446,7 +447,7 @@ function onWinRun() {
   gameState.town.upgradedVisual = true;
   if (Math.random() < 0.5) gameState.player.maxHp += 1;
   else gameState.player.maxPp += 1;
-  addLog("帰還成功! 次回は敵が少し増える。");
+  addLog("帰還成功! 外部ネットの負荷が増し、次回は脅威が増える。");
   startTown();
 }
 
@@ -457,12 +458,12 @@ function updateHint() {
   const nearbyObj = area.objects.find((o) => distance(o, p) <= 1);
 
   const hintMap = {
-    T: "E: 訓練 (最大HP+1)",
-    R: "E: 休息 (HP/PP回復)",
-    D: "E: ダンジョンへ",
-    B: "E: 任務受注",
-    I: "E: コア回収",
-    X: "E: 脱出",
+    T: "E: 動作最適化 (最大HP+1)",
+    R: "E: リソース回復 (HP/PP回復)",
+    D: "E: ネット接続ポータルへ",
+    B: "E: 依頼板で任務受注",
+    I: "E: コアデータ回収",
+    X: "E: 接続切断して帰還",
   };
 
   const text = nearbyObj ? hintMap[nearbyObj.type] || "E: 調べる" : "";
@@ -474,7 +475,7 @@ function update(action, payload = {}) {
   if (action === "START_GAME") {
     gameState.town.map = makeTownMap();
     startTown();
-    addLog("町フィールド開始。掲示板(B)で任務受注。Eで操作。");
+    addLog("自然の村ハブ開始。依頼板(B)で任務受注、Eで操作。");
   }
 
   if (action === "MOVE" && (gameState.phase === "town" || gameState.phase === "playing")) moveActor(payload.dx, payload.dy);
@@ -484,7 +485,7 @@ function update(action, payload = {}) {
   if (action === "RESTART") {
     gameState.mission.retrieved = false;
     startTown();
-    addLog("町へ戻った。再挑戦しよう。");
+    addLog("村ハブへ戻った。接続を整えて再挑戦しよう。");
   }
 
   render();
@@ -577,19 +578,19 @@ function render() {
 
   if (gameState.phase === "start") {
     viewEl.className = "";
-    viewEl.innerHTML = `<h2>開始</h2><p>町を歩き、任務受注後に大きな1フロアを探索。</p>`;
+    viewEl.innerHTML = `<h2>開始</h2><p>自然の村に見えるローカルシステムから、外部ネット空間を探索する。</p>`;
     controlsEl.innerHTML = `<div class='controls-row'><button data-action='START_GAME'>ゲーム開始</button></div>`;
   }
 
   if (gameState.phase === "town") {
     viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
-    viewEl.innerHTML = renderArea(gameState.town.map, "町フィールド", gameState.town.hint);
+    viewEl.innerHTML = renderArea(gameState.town.map, "村ハブ（ローカルシステム）", gameState.town.hint);
     controlsEl.innerHTML = `<div class='controls-row'><button data-action='INTERACT'>E: 調べる</button></div>`;
   }
 
   if (gameState.phase === "playing") {
-    viewEl.className = "";
-    viewEl.innerHTML = renderArea(gameState.dungeon.floor, "連続ダンジョンフロア", gameState.dungeon.hint);
+    viewEl.className = gameState.dungeon.unstable ? "network-unstable" : "";
+    viewEl.innerHTML = renderArea(gameState.dungeon.floor, "外部ネット空間（不安定データセクタ）", gameState.dungeon.hint);
     controlsEl.innerHTML = `
       <div class='controls-row'>
         <button data-action='INTERACT'>E: 調べる</button>

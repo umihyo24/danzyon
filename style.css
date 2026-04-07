@@ -36,6 +36,11 @@ body {
   border-color: #8ee09e;
 }
 
+#view.network-unstable {
+  border-color: #ff8f8f;
+  box-shadow: 0 0 0 2px rgba(255, 120, 120, 0.35) inset;
+}
+
 .grid {
   display: grid;
   gap: 4px;
