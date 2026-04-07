@@ -1,5 +1,5 @@
 const CONFIG = {
-  tileSize: 40,
+  tileSize: 54,
   viewport: { w: 9, h: 9 },
   town: { w: 24, h: 16 },
   floor: { w: 40, h: 28 },
@@ -11,7 +11,7 @@ const CONFIG = {
   reviveHp: 2,
   dangerRadius: 3,
   logLimit: 6,
-  breathStepMax: 30,
+  lungCapacity: 10,
   inventorySlots: 10,
   fishUpgradeBase: 8,
   levelUpHpGain: 1,
@@ -58,6 +58,8 @@ const gameState = {
     effects: [],
     hoverEnemy: null,
     attackMode: false,
+    statusOpen: false,
+    hoverTile: null,
   },
   town: {
     level: 0,
@@ -75,8 +77,8 @@ const gameState = {
     reviveUsed: false,
     facing: 1,
     inventory: [],
-    maxOxygen: 30,
-    oxygen: 30,
+    maxOxygen: 100,
+    oxygen: 100,
     breathSteps: 0,
     fishThisRun: 0,
     totalFish: 0,
@@ -95,6 +97,9 @@ const gameState = {
     enabled: false,
     style: "balanced", // aggressive | balanced | cautious
     timerId: null,
+    stuckTurns: 0,
+    targetKey: "",
+    lastPos: null,
   },
 };
 
@@ -366,6 +371,9 @@ function makeTownMap() {
 function startTown() {
   stopAutoLoop();
   gameState.auto.enabled = false;
+  gameState.auto.stuckTurns = 0;
+  gameState.auto.targetKey = "";
+  gameState.auto.lastPos = null;
   gameState.phase = "town";
   ensureInventorySize();
   if (!gameState.town.map) gameState.town.map = makeTownMap();
@@ -373,6 +381,7 @@ function startTown() {
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
   gameState.player.facing = 1;
+  gameState.ui.statusOpen = false;
   updateHint();
 }
 
@@ -400,6 +409,7 @@ function startRun() {
     lastPressureTurn: 0,
     visitedRooms: {},
   };
+  gameState.ui.statusOpen = false;
   updateFov();
   updateDangerPreview();
   updateHint();
@@ -486,6 +496,25 @@ function startAutoLoop() {
 function stopAutoLoop() {
   if (gameState.auto.timerId) clearInterval(gameState.auto.timerId);
   gameState.auto.timerId = null;
+}
+
+function toggleAutoMode(nextEnabled = null, reason = "") {
+  const next = nextEnabled === null ? !gameState.auto.enabled : !!nextEnabled;
+  if (next === gameState.auto.enabled) return;
+  gameState.auto.enabled = next;
+  if (next) {
+    gameState.auto.stuckTurns = 0;
+    gameState.auto.targetKey = "";
+    gameState.auto.lastPos = null;
+    startAutoLoop();
+    addLog("AUTO開始");
+  } else {
+    stopAutoLoop();
+    gameState.auto.stuckTurns = 0;
+    gameState.auto.targetKey = "";
+    gameState.auto.lastPos = null;
+    addLog(reason || "AUTOを解除した");
+  }
 }
 
 function applyInteraction(obj) {
@@ -867,8 +896,8 @@ function consumeOxygen() {
   if (gameState.phase !== "playing") return;
   const stepGain = 1 + Math.max(0, gameState.dungeon.depth - 1);
   gameState.player.breathSteps += stepGain;
-  while (gameState.player.breathSteps >= CONFIG.breathStepMax) {
-    gameState.player.breathSteps -= CONFIG.breathStepMax;
+  while (gameState.player.breathSteps >= CONFIG.lungCapacity) {
+    gameState.player.breathSteps -= CONFIG.lungCapacity;
     gameState.player.oxygen = Math.max(0, gameState.player.oxygen - 1);
   }
   if (gameState.player.oxygen <= 0) {
@@ -896,6 +925,17 @@ function updateDangerPreview() {
     return distance(e, p) <= CONFIG.dangerRadius;
   }).length;
   gameState.dangerPreview = near ? `危険: ${near}体接近` : "安全";
+}
+
+function isTileThreatened(area, x, y) {
+  return area.enemies.some((e) => {
+    if (e.hp <= 0) return false;
+    const type = getEnemyType(e);
+    const d = Math.abs(e.x - x) + Math.abs(e.y - y);
+    if (d === 1) return true;
+    if (type.id === "penguin" && (e.x === x || e.y === y) && d <= type.range && !isLineBlockedByWall(area, e, { x, y })) return true;
+    return false;
+  });
 }
 
 function onReturnRun() {
@@ -988,6 +1028,16 @@ function findNearest(area, from, list) {
   return valid[0] || null;
 }
 
+function autoTargetKey(action, area, p) {
+  if (action.type === "move") return `move:${p.x + action.dir.x},${p.y + action.dir.y}`;
+  if (action.type === "attack") return `attack:${p.x + action.dir.x},${p.y + action.dir.y}`;
+  if (action.type === "special") {
+    const nearestEnemy = findNearest(area, p, area.enemies.filter((e) => e.hp > 0));
+    if (nearestEnemy) return `special:${nearestEnemy.x},${nearestEnemy.y}`;
+  }
+  return action.type;
+}
+
 function roomIndexAt(area, x, y) {
   if (!area.rooms) return -1;
   return area.rooms.findIndex((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
@@ -1019,6 +1069,30 @@ function stepToward(area, from, target) {
     const ny = from.y + c.dy;
     return tileAt(area, nx, ny) !== "wall" && !enemyAt(area, nx, ny);
   }) || null;
+}
+
+function getFallbackAutoMove(area, from, failedDir = null) {
+  const dirs = Object.values(DIRS).filter((d) => !failedDir || d.x !== failedDir.x || d.y !== failedDir.y);
+  const candidates = dirs
+    .map((d) => ({ dir: d, x: from.x + d.x, y: from.y + d.y }))
+    .filter((c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y));
+  candidates.sort((a, b) => {
+    const aScore = (itemAt(area, a.x, a.y) ? 3 : 0) + (!isDiscovered(a.x, a.y) ? 2 : 0) + (objectAt(area, a.x, a.y) ? 1 : 0);
+    const bScore = (itemAt(area, b.x, b.y) ? 3 : 0) + (!isDiscovered(b.x, b.y) ? 2 : 0) + (objectAt(area, b.x, b.y) ? 1 : 0);
+    return bScore - aScore;
+  });
+  return candidates[0]?.dir || null;
+}
+
+function handleAutoStuck(progressed) {
+  if (progressed) {
+    gameState.auto.stuckTurns = 0;
+    return;
+  }
+  gameState.auto.stuckTurns += 1;
+  if (gameState.auto.stuckTurns > 3) {
+    toggleAutoMode(false, "進めないためAUTOを停止した");
+  }
 }
 
 function adjacentEnemyDirection(area, p) {
@@ -1072,15 +1146,45 @@ function decideAutoAction() {
 
 function performAutoTurn() {
   if (!gameState.auto.enabled || gameState.phase !== "playing") return;
+  const area = currentArea();
+  const beforePos = { x: area.playerPos.x, y: area.playerPos.y };
+  const beforeEnemyHp = area.enemies.reduce((sum, e) => sum + Math.max(0, e.hp), 0);
+  const beforeItems = area.items.length;
+  const beforeFish = gameState.player.fishThisRun;
+  const beforeRetrieved = gameState.mission.retrieved;
   const action = decideAutoAction();
+  const key = autoTargetKey(action, area, beforePos);
+  if (key !== gameState.auto.targetKey) gameState.auto.stuckTurns = 0;
+  gameState.auto.targetKey = key;
   if (action.type === "attack") performPlayerAttack(action.dir.x, action.dir.y);
   if (action.type === "special") useSpecial();
   if (action.type === "item") useItemSlot(action.index);
   if (action.type === "move") {
     const moved = tryMovePlayer(action.dir.x, action.dir.y);
-    if (!moved) performWait();
+    if (!moved) {
+      const fallback = getFallbackAutoMove(area, beforePos, action.dir);
+      if (fallback) {
+        const fallbackMoved = tryMovePlayer(fallback.x, fallback.y);
+        if (!fallbackMoved) performWait();
+      } else {
+        performWait();
+      }
+    }
   }
   if (action.type === "wait") performWait();
+  const afterArea = currentArea();
+  if (!afterArea || gameState.phase !== "playing") return render();
+  const afterPos = afterArea.playerPos;
+  const afterEnemyHp = afterArea.enemies.reduce((sum, e) => sum + Math.max(0, e.hp), 0);
+  const progressed =
+    beforePos.x !== afterPos.x ||
+    beforePos.y !== afterPos.y ||
+    afterEnemyHp < beforeEnemyHp ||
+    afterArea.items.length < beforeItems ||
+    gameState.player.fishThisRun > beforeFish ||
+    (!beforeRetrieved && gameState.mission.retrieved);
+  handleAutoStuck(progressed);
+  gameState.auto.lastPos = { x: afterPos.x, y: afterPos.y };
   render();
 }
 
@@ -1116,12 +1220,12 @@ function update(action, payload = {}) {
     startTown();
     addLog("村へ戻った。準備して再挑戦しよう。");
   }
+  if (action === "TOGGLE_STATUS" && (gameState.phase === "town" || gameState.phase === "playing")) {
+    gameState.ui.statusOpen = !gameState.ui.statusOpen;
+  }
 
   if (action === "TOGGLE_AUTO") {
-    gameState.auto.enabled = !gameState.auto.enabled;
-    if (gameState.auto.enabled) startAutoLoop();
-    else stopAutoLoop();
-    addLog(`AUTO: ${gameState.auto.enabled ? "ON" : "OFF"}`);
+    toggleAutoMode();
   }
   if (action === "AUTO_STYLE" && ["aggressive", "balanced", "cautious"].includes(payload.style)) {
     gameState.auto.style = payload.style;
@@ -1202,7 +1306,8 @@ function tileVisual(area, x, y) {
 function renderArea(area, title, hint) {
   const cam = cameraFor(area);
   gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
-  let html = `<div class="field-shell"><h2>${title}</h2><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
+  const focusEnemy = findNearest(area, area.playerPos, area.enemies.filter((e) => e.hp > 0));
+  let html = `<div class="field-shell"><div class="hint-corner">${hint || ""}</div><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
 
   for (let y = cam.y0; y < cam.y0 + cam.h; y++) {
     for (let x = cam.x0; x < cam.x0 + cam.w; x++) {
@@ -1220,11 +1325,25 @@ function renderArea(area, title, hint) {
       const playerTileClass = vis.type === "player" ? " player-tile" : "";
       const visibilityClass = isVisible(x, y) ? " tile-visible" : " tile-memory";
       const hiddenClass = vis.type === "hidden" ? " tile-hidden" : "";
-      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}><span class="${flipClass} sym-${vis.type}">${vis.symbol}</span></div>`;
+      const enemyHere = enemyAt(area, x, y);
+      const objHere = objectAt(area, x, y);
+      const itemHere = itemAt(area, x, y);
+      const threatClass = isTileThreatened(area, x, y) ? " tile-threat" : "";
+      const focusClass = focusEnemy && focusEnemy.x === x && focusEnemy.y === y ? " tile-focus" : "";
+      const interactClass = (objHere && distance(objHere, area.playerPos) <= 1) || (itemHere && distance(itemHere, area.playerPos) <= 1) ? " tile-interact" : "";
+      const attackPreviewClass =
+        gameState.ui.attackMode &&
+        x === area.playerPos.x + gameState.player.facing &&
+        y === area.playerPos.y &&
+        enemyHere
+          ? " tile-attack-preview"
+          : "";
+      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}${threatClass}${focusClass}${interactClass}${attackPreviewClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}><span class="${flipClass} sym-${vis.type}">${vis.symbol}</span></div>`;
     }
   }
 
   html += `</div>`;
+  html += renderMiniMap(area, cam);
   if (gameState.phase === "playing") {
     const projectiles = gameState.ui.effects
       .map((e) => {
@@ -1257,43 +1376,86 @@ function renderArea(area, title, hint) {
       ? `<div class="enemy-info-panel"><strong>${hover.name}</strong><br>HP ${hover.hp} / ATK ${hover.attack}<br>${hover.desc}</div>`
       : ""
   }</div>`;
-  html += `<p class="meta">座標: (${area.playerPos.x},${area.playerPos.y})</p>`;
   html += `</div>`;
   return html;
 }
 
+function renderMiniMap(area, cam) {
+  if (gameState.phase !== "playing") return "";
+  let dots = "";
+  for (let y = 0; y < area.height; y++) {
+    for (let x = 0; x < area.width; x++) {
+      const discovered = isDiscovered(x, y);
+      const kind = !discovered ? "unknown" : tileAt(area, x, y) === "wall" ? "wall" : "floor";
+      const current = x === area.playerPos.x && y === area.playerPos.y ? " player" : "";
+      const focus = x >= cam.x0 && x < cam.x0 + cam.w && y >= cam.y0 && y < cam.y0 + cam.h ? " cam" : "";
+      dots += `<span class="mini-dot ${kind}${current}${focus}"></span>`;
+    }
+  }
+  return `<div class="minimap" style="grid-template-columns:repeat(${area.width},3px)">${dots}</div>`;
+}
+
 function renderHudBar() {
   const hpRatio = Math.max(0, Math.min(1, gameState.player.hp / gameState.player.maxHp));
-  const oxyRatio = Math.max(0, Math.min(1, gameState.player.oxygen / gameState.player.maxOxygen));
-  const floorLabel = gameState.phase === "playing" ? `${gameState.dungeon?.depth || 1}F` : "村";
   const hpState = hpRatio > 0.6 ? "safe" : hpRatio > 0.3 ? "mid" : "low";
   hudEl.innerHTML = `
     <div class="hud-bar">
-      <span class="hud-floor">${floorLabel}</span>
-      <span class="hud-auto">AUTO: ${gameState.auto.enabled ? "ON" : "OFF"} (${gameState.auto.style})</span>
-      <span class="hud-lv">LV ${gameState.player.level}</span>
-      <span class="hud-exp">EXP ${gameState.player.exp}/${gameState.player.nextExp}</span>
+      ${gameState.auto.enabled ? '<span class="hud-auto-dot">AUTO</span>' : ""}
       <div class="hp-wrap">
         <div class="hp-bar"><div class="hp-fill ${hpState}" style="width:${Math.round(hpRatio * 100)}%"></div></div>
         <span class="hud-hp">${gameState.player.hp}/${gameState.player.maxHp}</span>
       </div>
-      <div class="oxy-wrap">
-        <div class="oxy-bar"><div class="oxy-fill" style="width:${Math.round(oxyRatio * 100)}%"></div></div>
-        <span class="hud-oxy">O2 ${gameState.player.oxygen}/${gameState.player.maxOxygen}</span>
-        <span class="hud-breath">Breath ${gameState.player.breathSteps}/${CONFIG.breathStepMax}</span>
-      </div>
+      <span class="hud-oxy">O2 ${gameState.player.oxygen}</span>
       <span class="hud-pp">PP ${gameState.player.pp}/${gameState.player.maxPp}</span>
     </div>
   `;
 }
 
 function renderMessageBox() {
-  const [latest = "...", older = ""] = gameState.ui.messages;
-  const hint = gameState.phase === "playing" ? gameState.dungeon?.hint : gameState.town?.hint;
+  const [latest = "...", prev = ""] = gameState.ui.messages;
   logEl.innerHTML = `
     <div class="message-fixed latest">${latest}</div>
-    <div class="message-fixed older">${older}</div>
-    <div class="hint-line">${hint || ""}</div>
+    <div class="message-fixed older">${prev}</div>
+  `;
+}
+
+function renderActionBar() {
+  if (gameState.phase === "town") {
+    return `<div class='controls-row compact'><div class="control-group"><button data-action='INTERACT'>E: 調べる</button></div><div class="control-group subtle"><button data-action='TOGGLE_STATUS'>P: STATUS</button></div></div>`;
+  }
+  if (gameState.phase !== "playing") return "";
+  return `
+    <div class='controls-row compact'>
+      <div class="control-group">
+        <button data-action='INTERACT'>E</button>
+        <button data-action='ATTACK_MODE'>Z</button>
+        <button data-action='SPECIAL'>X</button>
+        <button data-action='WAIT'>Space</button>
+      </div>
+      <div class="control-group auto-group">
+        <button data-action='TOGGLE_AUTO'>Q</button>
+      </div>
+      <div class="control-group subtle">
+        <button data-action='AUTO_STYLE' data-style='aggressive'>1</button>
+        <button data-action='AUTO_STYLE' data-style='balanced'>2</button>
+        <button data-action='AUTO_STYLE' data-style='cautious'>3</button>
+        <button data-action='TOGGLE_STATUS'>P</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderStatusPanel() {
+  if (!gameState.ui.statusOpen) return "";
+  return `
+    <div class="status-overlay">
+      <h3>STATUS</h3>
+      <div>LV ${gameState.player.level}</div>
+      <div>EXP ${gameState.player.exp}/${gameState.player.nextExp}</div>
+      <div>Lung ${gameState.player.breathSteps}/${CONFIG.lungCapacity}</div>
+      <div>AUTO ${gameState.auto.enabled ? gameState.auto.style : "off"}</div>
+      <div class="meta">P: 閉じる</div>
+    </div>
   `;
 }
 
@@ -1308,26 +1470,14 @@ function render() {
 
   if (gameState.phase === "town") {
     viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
-    viewEl.innerHTML = renderArea(gameState.town.map, "村", gameState.town.hint);
-    controlsEl.innerHTML = `<div class='controls-row'><button data-action='INTERACT'>E: 調べる</button></div>`;
+    viewEl.innerHTML = renderArea(gameState.town.map, "村", gameState.town.hint) + renderStatusPanel();
+    controlsEl.innerHTML = renderActionBar();
   }
 
   if (gameState.phase === "playing") {
     viewEl.className = gameState.dungeon.unstable ? "floor-unstable" : "";
-    viewEl.innerHTML = renderArea(gameState.dungeon.floor, "海底", gameState.dungeon.hint);
-    controlsEl.innerHTML = `
-      <div class='controls-row'>
-        <button data-action='INTERACT'>E: 調べる</button>
-        <button data-action='ATTACK_MODE'>Z: 通常攻撃</button>
-        <button data-action='SPECIAL'>遠隔スキル(PP1)</button>
-        <button data-action='WAIT'>Space: 待機</button>
-        <button data-action='TOGGLE_AUTO'>Q: AUTO切替</button>
-        <button data-action='AUTO_STYLE' data-style='aggressive'>1: 攻撃型</button>
-        <button data-action='AUTO_STYLE' data-style='balanced'>2: バランス</button>
-        <button data-action='AUTO_STYLE' data-style='cautious'>3: 慎重</button>
-      </div>
-      <div class="meta">Arrow: 移動 / Z: 攻撃 / X: 遠隔 / Space: 待機 / Q: AUTO / 1-3: 方針</div>
-    `;
+    viewEl.innerHTML = renderArea(gameState.dungeon.floor, "海底", gameState.dungeon.hint) + renderStatusPanel();
+    controlsEl.innerHTML = renderActionBar();
   }
 
   if (gameState.phase === "gameover") {
@@ -1363,6 +1513,7 @@ viewEl.addEventListener("mousemove", (e) => {
   }
   const x = Number(tile.dataset.mapX);
   const y = Number(tile.dataset.mapY);
+  gameState.ui.hoverTile = { x, y };
   const enemy = enemyAt(gameState.dungeon.floor, x, y);
   if (!enemy) {
     if (gameState.ui.hoverEnemy) {
@@ -1380,6 +1531,7 @@ viewEl.addEventListener("mousemove", (e) => {
 });
 
 viewEl.addEventListener("mouseleave", () => {
+  gameState.ui.hoverTile = null;
   if (!gameState.ui.hoverEnemy) return;
   gameState.ui.hoverEnemy = null;
   render();
@@ -1405,6 +1557,26 @@ window.addEventListener("keydown", (e) => {
   if ((e.key === " " || e.code === "Space") && gameState.phase === "playing") {
     e.preventDefault();
     update("WAIT");
+  }
+  if ((e.key === "q" || e.key === "Q") && gameState.phase === "playing") {
+    e.preventDefault();
+    update("TOGGLE_AUTO");
+  }
+  if ((e.key === "1") && gameState.phase === "playing") {
+    e.preventDefault();
+    update("AUTO_STYLE", { style: "aggressive" });
+  }
+  if ((e.key === "2") && gameState.phase === "playing") {
+    e.preventDefault();
+    update("AUTO_STYLE", { style: "balanced" });
+  }
+  if ((e.key === "3") && gameState.phase === "playing") {
+    e.preventDefault();
+    update("AUTO_STYLE", { style: "cautious" });
+  }
+  if ((e.key === "p" || e.key === "P") && (gameState.phase === "town" || gameState.phase === "playing")) {
+    e.preventDefault();
+    update("TOGGLE_STATUS");
   }
 });
 
