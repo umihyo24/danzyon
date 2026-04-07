@@ -34,9 +34,17 @@ const DIRS = {
   ArrowRight: { x: 1, y: 0 },
 };
 
+const MONSTER_EMOJIS = ["🦬", "🦏", "🦛", "🐫", "🦣", "🐁", "🐊", "🦕", "🦈", "🐳", "🦐", "🦑", "🦞", "🐧", "🦚", "🐜", "🪳", "🐝", "🐞", "🤺", "🦇", "🐣", "🐎", "🐆", "🐩", "🐈"];
+
 const gameState = {
   phase: "start", // start | town | playing | gameover
   assets: { images: {}, loaded: false },
+  ui: {
+    statusOpen: false,
+    message: "",
+    messageVisible: false,
+    messageTimer: null,
+  },
   town: {
     level: 0,
     upgradedVisual: false,
@@ -50,6 +58,7 @@ const gameState = {
     maxPp: 3,
     pp: 3,
     reviveUsed: false,
+    facing: 1,
   },
   mission: {
     targetItemName: "コア",
@@ -58,7 +67,6 @@ const gameState = {
   },
   dungeon: null,
   dangerPreview: "-",
-  logs: ["開始: 村で準備しよう。"],
 };
 
 const hudEl = document.querySelector("#hud");
@@ -67,8 +75,13 @@ const controlsEl = document.querySelector("#controls");
 const logEl = document.querySelector("#log");
 
 function addLog(msg) {
-  gameState.logs.unshift(msg);
-  gameState.logs = gameState.logs.slice(0, CONFIG.logLimit);
+  gameState.ui.message = msg;
+  gameState.ui.messageVisible = true;
+  if (gameState.ui.messageTimer) clearTimeout(gameState.ui.messageTimer);
+  gameState.ui.messageTimer = setTimeout(() => {
+    gameState.ui.messageVisible = false;
+    render();
+  }, 1800);
 }
 
 function makePlaceholder(char, bg) {
@@ -179,8 +192,9 @@ function canSpawnEnemy(area, x, y) {
 function spawnEnemySafe(area, x, y, hp) {
   const pos = nearestFloorTile(area, x, y);
   if (!pos) return;
+  const emoji = MONSTER_EMOJIS[area.enemies.length % MONSTER_EMOJIS.length];
   if (canSpawnEnemy(area, pos.x, pos.y)) {
-    area.enemies.push({ x: pos.x, y: pos.y, hp });
+    area.enemies.push({ x: pos.x, y: pos.y, hp, emoji, facing: Math.random() < 0.5 ? -1 : 1 });
     return;
   }
   for (let r = 1; r < 8; r++) {
@@ -188,7 +202,7 @@ function spawnEnemySafe(area, x, y, hp) {
       for (let xx = pos.x - r; xx <= pos.x + r; xx++) {
         if (!inBounds(area, xx, yy)) continue;
         if (canSpawnEnemy(area, xx, yy)) {
-          area.enemies.push({ x: xx, y: yy, hp });
+          area.enemies.push({ x: xx, y: yy, hp, emoji, facing: Math.random() < 0.5 ? -1 : 1 });
           return;
         }
       }
@@ -254,6 +268,7 @@ function startTown() {
   gameState.town.map.playerPos = { x: 17, y: 11 };
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
+  gameState.player.facing = 1;
   updateHint();
 }
 
@@ -370,6 +385,7 @@ function moveActor(dx, dy) {
   const p = area.playerPos;
   const nx = p.x + dx;
   const ny = p.y + dy;
+  if (dx !== 0) gameState.player.facing = dx < 0 ? -1 : 1;
 
   if (tileAt(area, nx, ny) === "wall") {
     addLog("壁で進めない。");
@@ -442,6 +458,7 @@ function enemyTurn() {
       (c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y) && !(c.x === p.x && c.y === p.y)
     );
     if (next) {
+      if (next.x !== enemy.x) enemy.facing = next.x < enemy.x ? -1 : 1;
       enemy.x = next.x;
       enemy.y = next.y;
     }
@@ -563,10 +580,10 @@ function spriteForTile(type, symbol) {
 
 function tileVisual(area, x, y) {
   const p = area.playerPos;
-  if (p.x === x && p.y === y) return { type: "player", symbol: "🦭" };
+  if (p.x === x && p.y === y) return { type: "player", symbol: "🦭", facing: gameState.player.facing };
 
   const e = enemyAt(area, x, y);
-  if (e) return { type: "enemy", symbol: "M" };
+  if (e) return { type: "enemy", symbol: e.emoji || "🦬", facing: e.facing || 1 };
 
   const it = itemAt(area, x, y);
   if (it) {
@@ -588,44 +605,57 @@ function tileVisual(area, x, y) {
     return { type: map[obj.type], symbol: symbols[obj.type] };
   }
 
-  return tileAt(area, x, y) === "wall" ? { type: "wall", symbol: "■" } : { type: "floor", symbol: "·" };
+  return tileAt(area, x, y) === "wall" ? { type: "wall", symbol: "■", facing: 1 } : { type: "floor", symbol: "·", facing: 1 };
 }
 
 function renderArea(area, title, hint) {
   const cam = cameraFor(area);
-  let html = `<h2>${title}</h2><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
+  let html = `<div class="field-shell"><h2>${title}</h2><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
 
   for (let y = cam.y0; y < cam.y0 + cam.h; y++) {
     for (let x = cam.x0; x < cam.x0 + cam.w; x++) {
       const vis = tileVisual(area, x, y);
       const sprite = spriteForTile(vis.type, vis.symbol);
-      html += `<div class="tile" style="background-image:url('${sprite.src}')"><span>${vis.symbol}</span></div>`;
+      const flipClass = vis.facing === -1 ? "flip-x" : "";
+      html += `<div class="tile" style="background-image:url('${sprite.src}')"><span class="${flipClass}">${vis.symbol}</span></div>`;
     }
   }
 
-  html += `</div><p class="meta">座標: (${area.playerPos.x},${area.playerPos.y}) / カメラ: (${cam.x0},${cam.y0})</p>`;
-  html += `<p class="warn">${hint || "周囲を探索しよう"}</p>`;
+  html += `</div>`;
+  html += `<div class="hint-overlay">${hint || ""}</div>`;
+  html += `<p class="meta">座標: (${area.playerPos.x},${area.playerPos.y})</p>`;
+  html += `</div>`;
   return html;
 }
 
-function renderHud() {
-  hudEl.innerHTML = `
-    <strong>Phase:</strong> ${gameState.phase}
-    <br><strong>HP</strong> ${gameState.player.hp}/${gameState.player.maxHp}
-    | <strong>ATK</strong> ${gameState.player.atk}
-    | <strong>PP</strong> ${gameState.player.pp}/${gameState.player.maxPp}
-    <br><strong>Mission:</strong> ${gameState.mission.targetItemName} 回収 ${gameState.mission.retrieved ? "✅" : "❌"}
-    | 受注 ${gameState.mission.accepted ? "✅" : "❌"}
-    <br><strong>Danger:</strong> ${gameState.dangerPreview}
+function renderStatusOverlay() {
+  if (!gameState.ui.statusOpen) return "";
+  return `
+    <div class="status-modal">
+      <h3>ステータス</h3>
+      <p>HP ${gameState.player.hp}/${gameState.player.maxHp}</p>
+      <p>ATK ${gameState.player.atk}</p>
+      <p>PP ${gameState.player.pp}/${gameState.player.maxPp}</p>
+      <p>任務: ${gameState.mission.targetItemName} ${gameState.mission.retrieved ? "回収済み" : "未回収"}</p>
+      <p>任務受注: ${gameState.mission.accepted ? "済み" : "未"}</p>
+      <p>村レベル: ${gameState.town.level}</p>
+      <p>復活: ${gameState.player.reviveUsed ? "使用済み" : "未使用"}</p>
+      <p class="meta">Escで閉じる</p>
+    </div>
   `;
 }
 
+function renderMessageOverlay() {
+  if (!gameState.ui.messageVisible) return "";
+  return `<div class="message-popup">${gameState.ui.message}</div>`;
+}
+
 function render() {
-  renderHud();
+  hudEl.innerHTML = "";
 
   if (gameState.phase === "start") {
     viewEl.className = "";
-    viewEl.innerHTML = `<h2>開始</h2><p>村で準備を整え、ダンジョンでコアを探そう。</p>`;
+    viewEl.innerHTML = `<div class="field-shell"><h2>開始</h2><p>村で準備を整え、ダンジョンでコアを探そう。</p></div>`;
     controlsEl.innerHTML = `<div class='controls-row'><button data-action='START_GAME'>ゲーム開始</button></div>`;
   }
 
@@ -648,11 +678,13 @@ function render() {
 
   if (gameState.phase === "gameover") {
     viewEl.className = "";
-    viewEl.innerHTML = `<h2>ゲームオーバー</h2><p>再挑戦しますか？</p>`;
+    viewEl.innerHTML = `<div class="field-shell"><h2>ゲームオーバー</h2><p>再挑戦しますか？</p></div>`;
     controlsEl.innerHTML = `<div class='controls-row'><button data-action='RESTART'>町へ戻る</button></div>`;
   }
 
-  logEl.innerHTML = gameState.logs.map((l) => `<div>${l}</div>`).join("");
+  logEl.innerHTML = "";
+  viewEl.innerHTML += renderMessageOverlay();
+  viewEl.innerHTML += renderStatusOverlay();
 }
 
 controlsEl.addEventListener("click", (e) => {
@@ -669,6 +701,11 @@ window.addEventListener("keydown", (e) => {
   if ((e.key === "e" || e.key === "E") && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
     update("INTERACT");
+  }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    gameState.ui.statusOpen = !gameState.ui.statusOpen;
+    render();
   }
 });
 
