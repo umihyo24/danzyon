@@ -156,6 +156,33 @@ body {
   position: relative;
 }
 
+.battle-layout {
+  display: grid;
+  grid-template-columns: 190px auto 130px;
+  gap: 10px;
+  align-items: start;
+  justify-content: center;
+}
+
+.side-panel {
+  min-height: 120px;
+}
+
+.left-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.right-panel {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.board-pane {
+  position: relative;
+}
+
 .hint-corner {
   position: absolute;
   top: 6px;
@@ -194,11 +221,7 @@ body {
 }
 
 .item-slot-panel {
-  position: absolute;
-  top: 8px;
-  right: -128px;
-  width: 116px;
-  backdrop-filter: blur(2px);
+  display: none;
 }
 
 .slot-grid {
@@ -219,13 +242,7 @@ body {
 }
 
 .enemy-info-panel {
-  margin-top: 8px;
-  padding: 6px;
-  border: 1px solid #7b7fb5;
-  border-radius: 8px;
-  background: rgba(8, 20, 30, 0.9);
-  font-size: 0.75rem;
-  line-height: 1.3;
+  display: none;
 }
 
 .damage-float {
@@ -385,20 +402,17 @@ button:hover { background: #4b3f68; }
 }
 
 .minimap {
-  position: absolute;
-  left: 6px;
-  top: 6px;
   display: grid;
   gap: 1px;
-  padding: 4px;
-  border: 1px solid rgba(145, 175, 210, 0.6);
-  background: rgba(5, 15, 24, 0.74);
-  z-index: 3;
+  padding: 6px;
+  border: 1px solid rgba(145, 175, 210, 0.3);
+  background: rgba(5, 15, 24, 0.5);
+  width: fit-content;
 }
 
 .mini-dot {
-  width: 3px;
-  height: 3px;
+  width: 5px;
+  height: 5px;
   display: block;
   background: #1e4b61;
 }
@@ -408,3 +422,24 @@ button:hover { background: #4b3f68; }
 .mini-dot.floor { background: #3a6781; }
 .mini-dot.player { background: #9effba; }
 .mini-dot.cam { box-shadow: 0 0 0 1px rgba(241, 214, 141, 0.65) inset; }
+
+.enemy-info-fixed {
+  min-height: 96px;
+  padding: 8px;
+  border: 1px solid rgba(123, 127, 181, 0.55);
+  border-radius: 8px;
+  background: rgba(8, 20, 30, 0.7);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 980px) {
+  .battle-layout {
+    grid-template-columns: 150px auto 110px;
+    gap: 6px;
+  }
+  .mini-dot {
+    width: 4px;
+    height: 4px;
+  }
+}

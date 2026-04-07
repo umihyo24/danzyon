@@ -1303,11 +1303,36 @@ function tileVisual(area, x, y) {
   return { type: "floor", symbol: "·", facing: 1 };
 }
 
-function renderArea(area, title, hint) {
-  const cam = cameraFor(area);
+function renderLeftPanel(area, cam) {
+  const hover = gameState.ui.hoverEnemy;
+  return `
+    <aside class="side-panel left-panel">
+      ${renderMiniMap(area, cam)}
+      <div class="enemy-info-fixed">
+        ${
+          hover
+            ? `<strong>${hover.name}</strong><br>HP ${hover.hp} / ATK ${hover.attack}<br>${hover.desc}`
+            : `<span class="meta">敵情報: カーソルを敵に合わせる</span>`
+        }
+      </div>
+    </aside>
+  `;
+}
+
+function renderRightPanel() {
+  const slotsHtml = gameState.player.inventory
+    .map(
+      (slot, idx) =>
+        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う">${slot ? slot.emoji : "・"}</button>`
+    )
+    .join("");
+  return `<aside class="side-panel right-panel"><div class="slot-grid">${slotsHtml}</div></aside>`;
+}
+
+function renderBoard(area, cam, hint) {
   gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
   const focusEnemy = findNearest(area, area.playerPos, area.enemies.filter((e) => e.hp > 0));
-  let html = `<div class="field-shell"><div class="hint-corner">${hint || ""}</div><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
+  let html = `<div class="board-pane"><div class="hint-corner">${hint || ""}</div><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
 
   for (let y = cam.y0; y < cam.y0 + cam.h; y++) {
     for (let x = cam.x0; x < cam.x0 + cam.w; x++) {
@@ -1343,7 +1368,6 @@ function renderArea(area, title, hint) {
   }
 
   html += `</div>`;
-  html += renderMiniMap(area, cam);
   if (gameState.phase === "playing") {
     const projectiles = gameState.ui.effects
       .map((e) => {
@@ -1364,18 +1388,6 @@ function renderArea(area, title, hint) {
     html += `<div class="projectile-layer">${projectiles}</div>`;
   }
   html += `</div>`;
-  const slotsHtml = gameState.player.inventory
-    .map(
-      (slot, idx) =>
-        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う">${slot ? slot.emoji : "・"}</button>`
-    )
-    .join("");
-  const hover = gameState.ui.hoverEnemy;
-  html += `<div class="item-slot-panel"><div class="slot-grid">${slotsHtml}</div>${
-    hover
-      ? `<div class="enemy-info-panel"><strong>${hover.name}</strong><br>HP ${hover.hp} / ATK ${hover.attack}<br>${hover.desc}</div>`
-      : ""
-  }</div>`;
   html += `</div>`;
   return html;
 }
@@ -1392,7 +1404,20 @@ function renderMiniMap(area, cam) {
       dots += `<span class="mini-dot ${kind}${current}${focus}"></span>`;
     }
   }
-  return `<div class="minimap" style="grid-template-columns:repeat(${area.width},3px)">${dots}</div>`;
+  return `<div class="minimap" style="grid-template-columns:repeat(${area.width},5px)">${dots}</div>`;
+}
+
+function renderArea(area, title, hint) {
+  const cam = cameraFor(area);
+  return `
+    <div class="field-shell">
+      <div class="battle-layout">
+        ${renderLeftPanel(area, cam)}
+        ${renderBoard(area, cam, hint)}
+        ${renderRightPanel()}
+      </div>
+    </div>
+  `;
 }
 
 function renderHudBar() {
