@@ -183,15 +183,11 @@ body {
   position: relative;
 }
 
-.hint-corner {
-  position: absolute;
-  top: 6px;
-  right: 8px;
+.hint-side {
   font-size: 0.72rem;
   color: #9f97bb;
-  opacity: 0.85;
-  pointer-events: none;
-  z-index: 2;
+  opacity: 0.9;
+  min-height: 18px;
 }
 
 .projectile-layer {
@@ -405,8 +401,8 @@ button:hover { background: #4b3f68; }
   display: grid;
   gap: 1px;
   padding: 6px;
-  border: 1px solid rgba(145, 175, 210, 0.3);
-  background: rgba(5, 15, 24, 0.5);
+  border: 1px solid rgba(145, 175, 210, 0.2);
+  background: rgba(5, 15, 24, 0.35);
   width: fit-content;
 }
 

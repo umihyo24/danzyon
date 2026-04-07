@@ -1303,11 +1303,12 @@ function tileVisual(area, x, y) {
   return { type: "floor", symbol: "·", facing: 1 };
 }
 
-function renderLeftPanel(area, cam) {
+function renderLeftPanel(area, cam, hint) {
   const hover = gameState.ui.hoverEnemy;
   return `
     <aside class="side-panel left-panel">
       ${renderMiniMap(area, cam)}
+      <div class="hint-side">${hint || ""}</div>
       <div class="enemy-info-fixed">
         ${
           hover
@@ -1329,10 +1330,10 @@ function renderRightPanel() {
   return `<aside class="side-panel right-panel"><div class="slot-grid">${slotsHtml}</div></aside>`;
 }
 
-function renderBoard(area, cam, hint) {
+function renderBoard(area, cam) {
   gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
   const focusEnemy = findNearest(area, area.playerPos, area.enemies.filter((e) => e.hp > 0));
-  let html = `<div class="board-pane"><div class="hint-corner">${hint || ""}</div><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
+  let html = `<div class="board-pane"><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
 
   for (let y = cam.y0; y < cam.y0 + cam.h; y++) {
     for (let x = cam.x0; x < cam.x0 + cam.w; x++) {
@@ -1412,8 +1413,8 @@ function renderArea(area, title, hint) {
   return `
     <div class="field-shell">
       <div class="battle-layout">
-        ${renderLeftPanel(area, cam)}
-        ${renderBoard(area, cam, hint)}
+        ${renderLeftPanel(area, cam, hint)}
+        ${renderBoard(area, cam)}
         ${renderRightPanel()}
       </div>
     </div>
