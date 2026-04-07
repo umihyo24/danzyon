@@ -1,3 +1,32 @@
+const CONFIG = {
+  tileSize: 40,
+  viewport: { w: 15, h: 11 },
+  town: { w: 24, h: 16 },
+  floor: { w: 40, h: 28 },
+  baseEnemyHp: 3,
+  enemyAttack: 1,
+  meleeDamage: 0, // uses player.atk
+  specialCost: 1,
+  specialRange: 4,
+  reviveHp: 2,
+  dangerRadius: 3,
+  logLimit: 6,
+};
+
+const ASSETS = {
+  floor: "assets/floor.png",
+  wall: "assets/wall.png",
+  player: "assets/player.png",
+  enemy: "assets/enemy.png",
+  item: "assets/item.png",
+  heal: "assets/heal.png",
+  stairs: "assets/stairs.png",
+  train: "assets/train.png",
+  rest: "assets/rest.png",
+  gate: "assets/gate.png",
+  board: "assets/board.png",
+};
+
 const DIRS = {
   ArrowUp: { x: 0, y: -1 },
   ArrowDown: { x: 0, y: 1 },
@@ -5,52 +34,12 @@ const DIRS = {
   ArrowRight: { x: 1, y: 0 },
 };
 
-const TOWN_MAP = [
-  "#######",
-  "#P..T.#",
-  "#.....#",
-  "#..R..#",
-  "#.....#",
-  "#..D..#",
-  "#######",
-];
-
-const DUNGEON_ROOMS = [
-  [
-    "#######",
-    "#P....#",
-    "#..#..#",
-    "#..E..#",
-    "#.....#",
-    "#..N..#",
-    "#######",
-  ],
-  [
-    "#######",
-    "#..B..#",
-    "#..#..#",
-    "#..E..#",
-    "#.....#",
-    "#..N..#",
-    "#######",
-  ],
-  [
-    "#######",
-    "#..B..#",
-    "#..#..#",
-    "#..E..#",
-    "#..I..#",
-    "#..X..#",
-    "#######",
-  ],
-];
-
 const gameState = {
   phase: "start", // start | town | playing | gameover
+  assets: { images: {}, loaded: false },
   town: {
     level: 0,
     upgradedVisual: false,
-    bonusApplied: false,
     map: null,
     hint: "",
   },
@@ -63,12 +52,13 @@ const gameState = {
     reviveUsed: false,
   },
   mission: {
-    targetItemName: "古代のコア",
+    targetItemName: "コアデータ",
     retrieved: false,
+    accepted: false,
   },
   dungeon: null,
   dangerPreview: "-",
-  logs: ["ようこそ。まずは町を歩いて準備しよう。"],
+  logs: ["開始: 自然の村で準備しよう（ローカルシステム）。"],
 };
 
 const hudEl = document.querySelector("#hud");
@@ -76,44 +66,181 @@ const viewEl = document.querySelector("#view");
 const controlsEl = document.querySelector("#controls");
 const logEl = document.querySelector("#log");
 
-function addLog(message) {
-  gameState.logs.unshift(message);
-  gameState.logs = gameState.logs.slice(0, 5);
+function addLog(msg) {
+  gameState.logs.unshift(msg);
+  gameState.logs = gameState.logs.slice(0, CONFIG.logLimit);
 }
 
-function parseMap(rows) {
-  const tiles = [];
-  const objects = [];
-  const enemies = [];
-  let playerPos = { x: 1, y: 1 };
+function makePlaceholder(char, bg) {
+  const canvas = document.createElement("canvas");
+  canvas.width = CONFIG.tileSize;
+  canvas.height = CONFIG.tileSize;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 20px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(char, canvas.width / 2, canvas.height / 2);
+  return canvas.toDataURL();
+}
 
-  rows.forEach((row, y) => {
-    tiles[y] = [];
-    row.split("").forEach((ch, x) => {
-      if (ch === "#") {
-        tiles[y][x] = "wall";
-      } else {
-        tiles[y][x] = "floor";
-      }
+function loadAssets() {
+  const fallback = {
+    floor: makePlaceholder("·", "#3a344e"),
+    wall: makePlaceholder("■", "#100f16"),
+    player: makePlaceholder("@", "#355f2f"),
+    enemy: makePlaceholder("M", "#6a2f2f"),
+    item: makePlaceholder("◆", "#635317"),
+    heal: makePlaceholder("+", "#2f5f5f"),
+    stairs: makePlaceholder("X", "#244863"),
+    train: makePlaceholder("T", "#355f2f"),
+    rest: makePlaceholder("R", "#2f5f5f"),
+    gate: makePlaceholder("D", "#5a3d1f"),
+    board: makePlaceholder("!", "#5e5a22"),
+  };
 
-      if (ch === "P") playerPos = { x, y };
-      if (["T", "R", "D", "N", "B", "X", "I"].includes(ch)) objects.push({ type: ch, x, y });
-      if (ch === "E") enemies.push({ x, y, hp: 3 + gameState.town.level });
-    });
+  const keys = Object.keys(ASSETS);
+  let remain = keys.length;
+
+  keys.forEach((key) => {
+    const img = new Image();
+    img.onload = () => {
+      gameState.assets.images[key] = img.src;
+      remain -= 1;
+      if (remain === 0) gameState.assets.loaded = true;
+      render();
+    };
+    img.onerror = () => {
+      gameState.assets.images[key] = fallback[key];
+      remain -= 1;
+      addLog(`画像不足: ${key} は代替表示を使用`);
+      if (remain === 0) gameState.assets.loaded = true;
+      render();
+    };
+    img.src = ASSETS[key];
   });
+}
 
+function createArea(width, height) {
+  const tiles = Array.from({ length: height }, () => Array.from({ length: width }, () => "wall"));
   return {
-    width: rows[0].length,
-    height: rows.length,
+    width,
+    height,
     tiles,
-    objects,
-    enemies,
-    playerPos,
+    objects: [],
+    enemies: [],
+    items: [],
+    playerPos: { x: 1, y: 1 },
   };
 }
 
+function carveRoom(area, room) {
+  for (let y = room.y; y < room.y + room.h; y++) {
+    for (let x = room.x; x < room.x + room.w; x++) area.tiles[y][x] = "floor";
+  }
+}
+
+function carveCorridor(area, a, b) {
+  let x = a.x;
+  let y = a.y;
+  while (x !== b.x) {
+    area.tiles[y][x] = "floor";
+    x += Math.sign(b.x - x);
+  }
+  while (y !== b.y) {
+    area.tiles[y][x] = "floor";
+    y += Math.sign(b.y - y);
+  }
+  area.tiles[y][x] = "floor";
+}
+
+function makeDungeonFloor() {
+  const area = createArea(CONFIG.floor.w, CONFIG.floor.h);
+  const rooms = [
+    { x: 2, y: 2, w: 8, h: 6 },
+    { x: 14, y: 3, w: 9, h: 7 },
+    { x: 28, y: 2, w: 9, h: 6 },
+    { x: 4, y: 13, w: 10, h: 8 },
+    { x: 19, y: 14, w: 8, h: 8 },
+    { x: 30, y: 16, w: 8, h: 7 },
+  ];
+
+  rooms.forEach((r) => carveRoom(area, r));
+
+  const centers = rooms.map((r) => ({ x: Math.floor(r.x + r.w / 2), y: Math.floor(r.y + r.h / 2) }));
+  for (let i = 0; i < centers.length - 1; i++) carveCorridor(area, centers[i], centers[i + 1]);
+  carveCorridor(area, centers[1], centers[4]);
+
+  area.playerPos = { x: centers[0].x, y: centers[0].y };
+  area.objects.push({ type: "X", x: centers[0].x + 1, y: centers[0].y + 1 }); // extraction
+  area.objects.push({ type: "I", x: centers[5].x, y: centers[5].y }); // mission item deep
+
+  const healSpots = [centers[2], centers[3], centers[4]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
+  area.items.push(...healSpots);
+
+  const enemySpawns = [centers[1], centers[2], centers[3], centers[4], centers[5], { x: 25, y: 10 }];
+  enemySpawns.forEach((s) => area.enemies.push({ x: s.x, y: s.y, hp: CONFIG.baseEnemyHp + gameState.town.level }));
+
+  for (let i = 0; i < gameState.town.level; i++) {
+    const s = enemySpawns[i % enemySpawns.length];
+    area.enemies.push({ x: s.x + (i % 2), y: s.y + ((i + 1) % 2), hp: CONFIG.baseEnemyHp + gameState.town.level });
+  }
+
+  return area;
+}
+
+function makeTownMap() {
+  const area = createArea(CONFIG.town.w, CONFIG.town.h);
+  for (let y = 1; y < area.height - 1; y++) {
+    for (let x = 1; x < area.width - 1; x++) area.tiles[y][x] = "floor";
+  }
+
+  for (let x = 4; x < 20; x++) area.tiles[8][x] = "wall";
+  area.tiles[8][11] = "floor";
+
+  area.playerPos = { x: 3, y: 3 };
+  area.objects.push({ type: "T", x: 6, y: 4 });
+  area.objects.push({ type: "R", x: 16, y: 4 });
+  area.objects.push({ type: "D", x: 20, y: 12 });
+  area.objects.push({ type: "B", x: 4, y: 12 }); // board
+  return area;
+}
+
+function startTown() {
+  gameState.phase = "town";
+  if (!gameState.town.map) gameState.town.map = makeTownMap();
+  gameState.town.map.playerPos = { x: 3, y: 3 };
+  gameState.player.hp = gameState.player.maxHp;
+  gameState.player.pp = gameState.player.maxPp;
+  updateHint();
+}
+
+function startRun() {
+  if (!gameState.mission.accepted) {
+    addLog("依頼板で任務を受注してから接続しよう。");
+    return;
+  }
+  gameState.phase = "playing";
+  gameState.player.hp = gameState.player.maxHp;
+  gameState.player.pp = gameState.player.maxPp;
+  gameState.player.reviveUsed = false;
+  gameState.mission.retrieved = false;
+  gameState.dungeon = { floor: makeDungeonFloor(), hint: "", turn: 1, unstable: false };
+  updateDangerPreview();
+  updateHint();
+  addLog("ネットワーク空間へ接続。コアデータを回収して帰還ポイント(X)へ。");
+}
+
+function currentArea() {
+  if (gameState.phase === "town") return gameState.town.map;
+  if (gameState.phase === "playing") return gameState.dungeon.floor;
+  return null;
+}
+
 function inBounds(area, x, y) {
-  return y >= 0 && y < area.height && x >= 0 && x < area.width;
+  return x >= 0 && x < area.width && y >= 0 && y < area.height;
 }
 
 function tileAt(area, x, y) {
@@ -121,148 +248,102 @@ function tileAt(area, x, y) {
   return area.tiles[y][x];
 }
 
-function distance(a, b) {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-}
-
 function objectAt(area, x, y) {
   return area.objects.find((o) => o.x === x && o.y === y);
 }
 
+function itemAt(area, x, y) {
+  return area.items.find((it) => it.x === x && it.y === y);
+}
+
 function enemyAt(area, x, y) {
-  return area.enemies?.find((e) => e.x === x && e.y === y && e.hp > 0);
+  return area.enemies.find((e) => e.x === x && e.y === y && e.hp > 0);
 }
 
-function buildTown() {
-  gameState.town.map = parseMap(TOWN_MAP);
+function distance(a, b) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
-function startRun() {
-  gameState.phase = "playing";
-  gameState.mission.retrieved = false;
-  gameState.player.hp = gameState.player.maxHp;
-  gameState.player.pp = gameState.player.maxPp;
-  gameState.player.reviveUsed = false;
-
-  const rooms = DUNGEON_ROOMS.map((layout, idx) => {
-    const room = parseMap(layout);
-    const extraEnemies = gameState.town.level;
-    for (let i = 0; i < extraEnemies; i++) {
-      room.enemies.push({ x: 4 + (i % 2), y: 4 - (i % 2), hp: 3 + gameState.town.level });
-    }
-    room.index = idx;
-    return room;
-  });
-
-  gameState.dungeon = {
-    rooms,
-    roomIndex: 0,
-    hint: "",
-    turn: 1,
-  };
-
-  updateDangerPreview();
-  updateHint();
-  addLog("ダンジョン突入。3部屋先のコアを回収して帰還せよ。");
-}
-
-function currentArea() {
-  if (gameState.phase === "town") return gameState.town.map;
-  if (gameState.phase === "playing") return gameState.dungeon.rooms[gameState.dungeon.roomIndex];
-  return null;
-}
-
-function startTownPhase() {
-  gameState.phase = "town";
-  if (!gameState.town.map) buildTown();
-  gameState.town.map.playerPos = { x: 1, y: 1 };
-  gameState.player.hp = gameState.player.maxHp;
-  gameState.player.pp = gameState.player.maxPp;
-  updateHint();
-}
-
-function transitionRoom(type) {
-  if (type === "N" && gameState.dungeon.roomIndex < gameState.dungeon.rooms.length - 1) {
-    gameState.dungeon.roomIndex += 1;
-    gameState.dungeon.rooms[gameState.dungeon.roomIndex].playerPos = { x: 1, y: 1 };
-    addLog(`次の部屋へ移動 (${gameState.dungeon.roomIndex + 1}/${gameState.dungeon.rooms.length})`);
-  }
-
-  if (type === "B" && gameState.dungeon.roomIndex > 0) {
-    gameState.dungeon.roomIndex -= 1;
-    gameState.dungeon.rooms[gameState.dungeon.roomIndex].playerPos = { x: 5, y: 5 };
-    addLog(`前の部屋へ戻った (${gameState.dungeon.roomIndex + 1}/${gameState.dungeon.rooms.length})`);
-  }
-
-  updateDangerPreview();
-}
-
-function applyInteraction(targetObject) {
-  if (!targetObject) return;
+function applyInteraction(obj) {
+  if (!obj) return;
 
   if (gameState.phase === "town") {
-    if (targetObject.type === "T") {
+    if (obj.type === "T") {
       gameState.player.maxHp += 1;
       gameState.player.hp = gameState.player.maxHp;
-      addLog("訓練スポット: 最大HP+1");
+      addLog("動作最適化を実施（見た目は鍛錬）: 最大HP+1");
     }
-    if (targetObject.type === "R") {
+    if (obj.type === "R") {
       gameState.player.hp = gameState.player.maxHp;
       gameState.player.pp = gameState.player.maxPp;
-      addLog("休息スポット: HP/PP全回復");
+      addLog("エネルギーを補充した（リソース回復）");
     }
-    if (targetObject.type === "D") {
-      startRun();
-      return;
+    if (obj.type === "D") startRun();
+    if (obj.type === "B") {
+      gameState.mission.accepted = true;
+      addLog("依頼板: 任務『コアデータ回収』を受注。");
     }
   }
 
   if (gameState.phase === "playing") {
-    if (targetObject.type === "I" && !gameState.mission.retrieved) {
+    if (obj.type === "I" && !gameState.mission.retrieved) {
       gameState.mission.retrieved = true;
-      addLog("古代のコアを回収した！入口(X)へ戻れ。");
-      return;
+      gameState.dungeon.unstable = true;
+      addLog("コアデータを回収！Connection unstable... 帰還ポイント(X)へ戻れ。");
     }
-
-    if (targetObject.type === "N" || targetObject.type === "B") {
-      transitionRoom(targetObject.type);
-      return;
-    }
-
-    if (targetObject.type === "X") {
-      if (gameState.mission.retrieved) {
-        onWinRun();
-      } else {
-        addLog("コア未回収。先に最終部屋で回収しよう。");
-      }
-      return;
+    if (obj.type === "X") {
+      if (!gameState.mission.retrieved) addLog("コアデータ未回収。異常セクタを探索しよう。");
+      else onWinRun();
     }
   }
+}
 
+function interactNearest() {
+  const area = currentArea();
+  if (!area) return;
+  const p = area.playerPos;
+  const obj = area.objects.find((o) => distance(o, p) <= 1);
+  if (!obj) {
+    addLog("近くに調べる対象がない。");
+    return;
+  }
+  applyInteraction(obj);
   updateHint();
+}
+
+function pickupIfAny(area) {
+  const p = area.playerPos;
+  const idx = area.items.findIndex((it) => it.x === p.x && it.y === p.y);
+  if (idx >= 0) {
+    const it = area.items[idx];
+    if (it.type === "H") {
+      gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 2);
+      addLog("補給データを取り込みHP+2");
+    }
+    area.items.splice(idx, 1);
+  }
 }
 
 function moveActor(dx, dy) {
   const area = currentArea();
   if (!area) return;
-
   const p = area.playerPos;
   const nx = p.x + dx;
   const ny = p.y + dy;
 
   if (tileAt(area, nx, ny) === "wall") {
-    addLog("壁だ。別ルートへ。");
-    return false;
+    addLog("壁で進めない。");
+    return;
   }
 
   if (gameState.phase === "playing") {
     const enemy = enemyAt(area, nx, ny);
     if (enemy) {
       enemy.hp -= gameState.player.atk;
-      addLog(`近接攻撃！${gameState.player.atk}ダメージ。`);
-      if (enemy.hp <= 0) addLog("敵を倒した。");
+      addLog(`近接攻撃: ${gameState.player.atk}ダメージ`);
+      if (enemy.hp <= 0) addLog("異常存在を除去した。");
       endPlayerTurn();
-      return true;
+      return;
     }
   }
 
@@ -270,132 +351,84 @@ function moveActor(dx, dy) {
   p.y = ny;
 
   if (gameState.phase === "playing") {
-    const stepObject = objectAt(area, nx, ny);
-    if (stepObject && ["N", "B"].includes(stepObject.type)) {
-      applyInteraction(stepObject);
-      return true;
-    }
+    pickupIfAny(area);
     endPlayerTurn();
   }
 
   updateHint();
-  return true;
-}
-
-function updateHint() {
-  const area = currentArea();
-  if (!area) return;
-  const p = area.playerPos;
-
-  const adjacent = area.objects.find((o) => distance(o, p) === 1 || (o.x === p.x && o.y === p.y));
-  if (!adjacent) {
-    if (gameState.phase === "town") gameState.town.hint = "";
-    if (gameState.phase === "playing") gameState.dungeon.hint = "";
-    return;
-  }
-
-  const messageMap = {
-    T: "訓練スポット: Eで最大HP+1",
-    R: "休息スポット: EでHP/PP回復",
-    D: "ダンジョン入口: Eで出発",
-    I: "目的アイテム: Eで回収",
-    X: "帰還ポイント: Eで脱出",
-    N: "通路: 踏むと次の部屋へ",
-    B: "通路: 踏むと前の部屋へ",
-  };
-
-  if (gameState.phase === "town") gameState.town.hint = messageMap[adjacent.type] || "Eで調べる";
-  if (gameState.phase === "playing") gameState.dungeon.hint = messageMap[adjacent.type] || "Eで調べる";
-}
-
-function interactNearest() {
-  const area = currentArea();
-  if (!area) return;
-  const p = area.playerPos;
-  const target = area.objects.find((o) => distance(o, p) === 1 || (o.x === p.x && o.y === p.y));
-  if (!target) {
-    addLog("近くに使えるものがない。");
-    return;
-  }
-  applyInteraction(target);
 }
 
 function useSpecial() {
   if (gameState.phase !== "playing") return;
-  if (gameState.player.pp <= 0) {
+  if (gameState.player.pp < CONFIG.specialCost) {
     addLog("PP不足。");
     return;
   }
 
-  const room = currentArea();
-  const p = room.playerPos;
-  const target = room.enemies
-    .filter((e) => e.hp > 0)
-    .sort((a, b) => distance(a, p) - distance(b, p))[0];
-
-  if (!target || distance(target, p) > 3) {
-    addLog("射程内に敵がいない。");
+  const area = currentArea();
+  const p = area.playerPos;
+  const target = area.enemies.filter((e) => e.hp > 0).sort((a, b) => distance(a, p) - distance(b, p))[0];
+  if (!target || distance(target, p) > CONFIG.specialRange) {
+    addLog("射程内に異常存在がいない。");
     return;
   }
 
-  gameState.player.pp -= 1;
+  gameState.player.pp -= CONFIG.specialCost;
   target.hp -= gameState.player.atk + 1;
-  addLog(`遠隔スキルで${gameState.player.atk + 1}ダメージ。`);
-  if (target.hp <= 0) addLog("敵を撃破。");
+  addLog(`遠隔スキル: ${gameState.player.atk + 1}ダメージ (PP-${CONFIG.specialCost})`);
+  if (target.hp <= 0) addLog("異常存在を除去した。");
   endPlayerTurn();
 }
 
-function endPlayerTurn() {
-  enemyTurn();
-  updateDangerPreview();
-  updateHint();
-  gameState.dungeon.turn += 1;
-}
-
 function enemyTurn() {
-  if (gameState.phase !== "playing") return;
-  const room = currentArea();
-  const p = room.playerPos;
-  const aggression = 1 + Math.min(gameState.town.level, 1);
+  const area = currentArea();
+  if (!area) return;
+  const p = area.playerPos;
+  const active = area.enemies.filter((e) => e.hp > 0);
+  area.enemies = active;
 
-  room.enemies.forEach((enemy) => {
-    if (enemy.hp <= 0) return;
+  area.enemies.forEach((enemy) => {
     if (distance(enemy, p) === 1) {
-      gameState.player.hp -= 1;
-      addLog("敵の攻撃で1ダメージ。");
+      gameState.player.hp -= CONFIG.enemyAttack;
+      addLog(`異常な存在が接近（ウイルス）: ${CONFIG.enemyAttack}ダメージ`);
       return;
     }
 
-    for (let s = 0; s < aggression; s++) {
-      const options = [
-        { x: enemy.x + Math.sign(p.x - enemy.x), y: enemy.y },
-        { x: enemy.x, y: enemy.y + Math.sign(p.y - enemy.y) },
-      ];
-      const next = options.find(
-        (o) => tileAt(room, o.x, o.y) !== "wall" && !enemyAt(room, o.x, o.y) && !(o.x === p.x && o.y === p.y)
-      );
-      if (next) {
-        enemy.x = next.x;
-        enemy.y = next.y;
-      }
-      if (distance(enemy, p) === 1) {
-        gameState.player.hp -= 1;
-        addLog("敵が接近して1ダメージ。");
-        break;
-      }
+    const candidates = [
+      { x: enemy.x + Math.sign(p.x - enemy.x), y: enemy.y },
+      { x: enemy.x, y: enemy.y + Math.sign(p.y - enemy.y) },
+    ];
+    const next = candidates.find(
+      (c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y) && !(c.x === p.x && c.y === p.y)
+    );
+    if (next) {
+      enemy.x = next.x;
+      enemy.y = next.y;
+    }
+
+    if (distance(enemy, p) === 1) {
+      gameState.player.hp -= CONFIG.enemyAttack;
+      addLog(`破損データが接近攻撃: ${CONFIG.enemyAttack}ダメージ`);
     }
   });
 
   if (gameState.player.hp <= 0) {
     if (!gameState.player.reviveUsed) {
       gameState.player.reviveUsed = true;
-      gameState.player.hp = 2;
-      addLog("一度だけ復活！HP2で再起。");
+      gameState.player.hp = CONFIG.reviveHp;
+      addLog(`復活! HP${CONFIG.reviveHp}`);
       return;
     }
     gameState.phase = "gameover";
-    addLog("力尽きた…。ゲームオーバー。");
+    addLog("力尽きた…。");
   }
+}
+
+function endPlayerTurn() {
+  enemyTurn();
+  if (gameState.phase === "playing") gameState.dungeon.turn += 1;
+  updateDangerPreview();
+  updateHint();
 }
 
 function updateDangerPreview() {
@@ -403,90 +436,128 @@ function updateDangerPreview() {
     gameState.dangerPreview = "-";
     return;
   }
-
-  const room = currentArea();
-  const p = room.playerPos;
-  const near = room.enemies.filter((e) => e.hp > 0 && distance(e, p) <= 2).length;
-  gameState.dangerPreview = near ? `危険: 近くに敵${near}体` : "安全";
+  const area = currentArea();
+  const p = area.playerPos;
+  const near = area.enemies.filter((e) => e.hp > 0 && distance(e, p) <= CONFIG.dangerRadius).length;
+  gameState.dangerPreview = near ? `危険: ${near}体接近（ウイルス反応）` : "安全";
 }
 
 function onWinRun() {
   gameState.town.level += 1;
-  if (!gameState.town.upgradedVisual) gameState.town.upgradedVisual = true;
-
-  if (!gameState.town.bonusApplied) {
-    gameState.town.bonusApplied = true;
-    gameState.player.atk += 1;
-    addLog("町の発展ボーナス: 攻撃+1");
-  }
-
+  gameState.town.upgradedVisual = true;
   if (Math.random() < 0.5) gameState.player.maxHp += 1;
   else gameState.player.maxPp += 1;
+  addLog("帰還成功! 外部ネットの負荷が増し、次回は脅威が増える。");
+  startTown();
+}
 
-  addLog("帰還成功！次回は敵が少し増える。");
-  startTownPhase();
+function updateHint() {
+  const area = currentArea();
+  if (!area) return;
+  const p = area.playerPos;
+  const nearbyObj = area.objects.find((o) => distance(o, p) <= 1);
+
+  const hintMap = {
+    T: "E: 動作最適化 (最大HP+1)",
+    R: "E: リソース回復 (HP/PP回復)",
+    D: "E: ネット接続ポータルへ",
+    B: "E: 依頼板で任務受注",
+    I: "E: コアデータ回収",
+    X: "E: 接続切断して帰還",
+  };
+
+  const text = nearbyObj ? hintMap[nearbyObj.type] || "E: 調べる" : "";
+  if (gameState.phase === "town") gameState.town.hint = text;
+  if (gameState.phase === "playing") gameState.dungeon.hint = text;
 }
 
 function update(action, payload = {}) {
   if (action === "START_GAME") {
-    buildTown();
-    startTownPhase();
-    addLog("町に到着。歩いて施設を使おう。Eで操作。");
+    gameState.town.map = makeTownMap();
+    startTown();
+    addLog("自然の村ハブ開始。依頼板(B)で任務受注、Eで操作。");
   }
 
-  if (action === "MOVE") {
-    if (gameState.phase === "town" || gameState.phase === "playing") moveActor(payload.dx, payload.dy);
-  }
-
-  if (action === "INTERACT") {
-    if (gameState.phase === "town" || gameState.phase === "playing") interactNearest();
-  }
-
+  if (action === "MOVE" && (gameState.phase === "town" || gameState.phase === "playing")) moveActor(payload.dx, payload.dy);
+  if (action === "INTERACT" && (gameState.phase === "town" || gameState.phase === "playing")) interactNearest();
   if (action === "SPECIAL" && gameState.phase === "playing") useSpecial();
 
   if (action === "RESTART") {
     gameState.mission.retrieved = false;
-    startTownPhase();
-    addLog("町から再挑戦。");
+    startTown();
+    addLog("村ハブへ戻った。接続を整えて再挑戦しよう。");
   }
 
   render();
 }
 
-function tileVisual(area, x, y) {
+function cameraFor(area) {
   const p = area.playerPos;
-  if (p.x === x && p.y === y) return { symbol: "@", className: "player" };
-
-  const e = area.enemies?.find((enemy) => enemy.x === x && enemy.y === y && enemy.hp > 0);
-  if (e) return { symbol: "M", className: "enemy" };
-
-  const o = objectAt(area, x, y);
-  if (!o) return { symbol: tileAt(area, x, y) === "wall" ? "■" : "·", className: "" };
-
-  const visuals = {
-    T: { symbol: "T", className: "train" },
-    R: { symbol: "+", className: "rest" },
-    D: { symbol: "D", className: "gate" },
-    N: { symbol: ">", className: "exit" },
-    B: { symbol: "<", className: "exit" },
-    X: { symbol: "X", className: "exit" },
-    I: { symbol: gameState.mission.retrieved ? "·" : "◆", className: "item" },
-  };
-  return visuals[o.type] || { symbol: "?", className: "" };
+  const halfW = Math.floor(CONFIG.viewport.w / 2);
+  const halfH = Math.floor(CONFIG.viewport.h / 2);
+  let x0 = p.x - halfW;
+  let y0 = p.y - halfH;
+  x0 = Math.max(0, Math.min(x0, area.width - CONFIG.viewport.w));
+  y0 = Math.max(0, Math.min(y0, area.height - CONFIG.viewport.h));
+  return { x0, y0, w: CONFIG.viewport.w, h: CONFIG.viewport.h };
 }
 
-function renderGrid(area, title, extraText = "") {
-  let html = `<h2>${title}</h2><div class="grid">`;
+function spriteForTile(type, symbol) {
+  const map = {
+    floor: "floor",
+    wall: "wall",
+    player: "player",
+    enemy: "enemy",
+    item: "item",
+    heal: "heal",
+    stairs: "stairs",
+    train: "train",
+    rest: "rest",
+    gate: "gate",
+    board: "board",
+  };
+  const key = map[type] || "floor";
+  const src = gameState.assets.images[key] || "";
+  return { src, symbol };
+}
 
-  for (let y = 0; y < area.height; y++) {
-    for (let x = 0; x < area.width; x++) {
-      const base = tileAt(area, x, y);
+function tileVisual(area, x, y) {
+  const p = area.playerPos;
+  if (p.x === x && p.y === y) return { type: "player", symbol: "@" };
+
+  const e = enemyAt(area, x, y);
+  if (e) return { type: "enemy", symbol: "M" };
+
+  const it = itemAt(area, x, y);
+  if (it) {
+    if (it.type === "H") return { type: "heal", symbol: "+" };
+  }
+
+  const obj = objectAt(area, x, y);
+  if (obj) {
+    if (obj.type === "I" && gameState.mission.retrieved) return { type: "floor", symbol: "·" };
+    const map = { I: "item", X: "stairs", T: "train", R: "rest", D: "gate", B: "board" };
+    const symbols = { I: "◆", X: "X", T: "T", R: "R", D: "D", B: "!" };
+    return { type: map[obj.type], symbol: symbols[obj.type] };
+  }
+
+  return tileAt(area, x, y) === "wall" ? { type: "wall", symbol: "■" } : { type: "floor", symbol: "·" };
+}
+
+function renderArea(area, title, hint) {
+  const cam = cameraFor(area);
+  let html = `<h2>${title}</h2><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
+
+  for (let y = cam.y0; y < cam.y0 + cam.h; y++) {
+    for (let x = cam.x0; x < cam.x0 + cam.w; x++) {
       const vis = tileVisual(area, x, y);
-      html += `<div class="tile ${base} ${vis.className}">${vis.symbol}</div>`;
+      const sprite = spriteForTile(vis.type, vis.symbol);
+      html += `<div class="tile" style="background-image:url('${sprite.src}')"><span>${vis.symbol}</span></div>`;
     }
   }
 
-  html += `</div>${extraText}`;
+  html += `</div><p class="meta">座標: (${area.playerPos.x},${area.playerPos.y}) / カメラ: (${cam.x0},${cam.y0})</p>`;
+  html += `<p class="warn">${hint || "周囲を探索しよう"}</p>`;
   return html;
 }
 
@@ -497,67 +568,44 @@ function renderHud() {
     | <strong>ATK</strong> ${gameState.player.atk}
     | <strong>PP</strong> ${gameState.player.pp}/${gameState.player.maxPp}
     <br><strong>Mission:</strong> ${gameState.mission.targetItemName} 回収 ${gameState.mission.retrieved ? "✅" : "❌"}
+    | 受注 ${gameState.mission.accepted ? "✅" : "❌"}
     <br><strong>Danger:</strong> ${gameState.dangerPreview}
   `;
 }
 
-function renderStart() {
-  viewEl.className = "";
-  viewEl.innerHTML = `<h2>開始</h2><p>町を歩いて準備し、3部屋ダンジョンでコアを回収して帰還せよ。</p>`;
-  controlsEl.innerHTML = `<div class="controls-row"><button data-action="START_GAME">ゲーム開始</button></div>`;
-}
-
-function renderTown() {
-  viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
-  viewEl.innerHTML = renderGrid(
-    gameState.town.map,
-    "町フィールド",
-    `<p class="ok">町レベル: ${gameState.town.level}${gameState.town.upgradedVisual ? " (発展済み)" : ""}</p>
-     <p class="warn">${gameState.town.hint || "施設の近くでE"}</p>`
-  );
-
-  controlsEl.innerHTML = `
-    <div class="controls-row">
-      <button data-action="INTERACT">E: 調べる</button>
-    </div>
-  `;
-}
-
-function renderDungeon() {
-  const roomNo = gameState.dungeon.roomIndex + 1;
-  const hint = gameState.dungeon.hint || "移動: 矢印 / 近くでE / 通路は踏むと移動";
-  viewEl.className = "";
-  viewEl.innerHTML = renderGrid(
-    currentArea(),
-    `ダンジョン ${roomNo}/${gameState.dungeon.rooms.length}`,
-    `<p class="warn">${hint}</p>`
-  );
-
-  controlsEl.innerHTML = `
-    <div class="controls-row">
-      <button data-action="INTERACT">E: 調べる</button>
-      <button data-action="SPECIAL">遠隔スキル(PP1)</button>
-    </div>
-  `;
-}
-
-function renderGameOver() {
-  viewEl.className = "";
-  viewEl.innerHTML = `<h2>ゲームオーバー</h2><p>再挑戦しよう。</p>`;
-  controlsEl.innerHTML = `<div class="controls-row"><button data-action="RESTART">町へ戻る</button></div>`;
-}
-
-function renderLog() {
-  logEl.innerHTML = gameState.logs.map((l) => `<div>${l}</div>`).join("");
-}
-
 function render() {
   renderHud();
-  if (gameState.phase === "start") renderStart();
-  if (gameState.phase === "town") renderTown();
-  if (gameState.phase === "playing") renderDungeon();
-  if (gameState.phase === "gameover") renderGameOver();
-  renderLog();
+
+  if (gameState.phase === "start") {
+    viewEl.className = "";
+    viewEl.innerHTML = `<h2>開始</h2><p>自然の村に見えるローカルシステムから、外部ネット空間を探索する。</p>`;
+    controlsEl.innerHTML = `<div class='controls-row'><button data-action='START_GAME'>ゲーム開始</button></div>`;
+  }
+
+  if (gameState.phase === "town") {
+    viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
+    viewEl.innerHTML = renderArea(gameState.town.map, "村ハブ（ローカルシステム）", gameState.town.hint);
+    controlsEl.innerHTML = `<div class='controls-row'><button data-action='INTERACT'>E: 調べる</button></div>`;
+  }
+
+  if (gameState.phase === "playing") {
+    viewEl.className = gameState.dungeon.unstable ? "network-unstable" : "";
+    viewEl.innerHTML = renderArea(gameState.dungeon.floor, "外部ネット空間（不安定データセクタ）", gameState.dungeon.hint);
+    controlsEl.innerHTML = `
+      <div class='controls-row'>
+        <button data-action='INTERACT'>E: 調べる</button>
+        <button data-action='SPECIAL'>遠隔スキル(PP1)</button>
+      </div>
+    `;
+  }
+
+  if (gameState.phase === "gameover") {
+    viewEl.className = "";
+    viewEl.innerHTML = `<h2>ゲームオーバー</h2><p>再挑戦しますか？</p>`;
+    controlsEl.innerHTML = `<div class='controls-row'><button data-action='RESTART'>町へ戻る</button></div>`;
+  }
+
+  logEl.innerHTML = gameState.logs.map((l) => `<div>${l}</div>`).join("");
 }
 
 controlsEl.addEventListener("click", (e) => {
@@ -577,4 +625,5 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+loadAssets();
 render();
