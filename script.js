@@ -810,41 +810,56 @@ function canUsePenguinRanged(enemy, area, playerPos) {
   return !isLineBlockedByWall(area, enemy, playerPos);
 }
 
+function canAttackNow(enemy, playerPos) {
+  return distance(enemy, playerPos) === 1;
+}
+
+function performStandardMeleeTurn(enemy, area, playerPos) {
+  if (canAttackNow(enemy, playerPos)) {
+    applyEnemyAttack(enemy, getEnemyType(enemy).attack);
+    return;
+  }
+  moveEnemyTowardPlayer(enemy, area, playerPos);
+}
+
+function performRangedTurn(enemy, area, playerPos) {
+  const type = getEnemyType(enemy);
+  if (canUsePenguinRanged(enemy, area, playerPos)) {
+    addProjectileEffect(enemy.x, enemy.y, playerPos.x, playerPos.y, "🧊");
+    applyEnemyAttack(enemy, type.attack, `${type.name}の氷つぶてで${type.attack}ダメージ`);
+    return;
+  }
+  if (canAttackNow(enemy, playerPos)) {
+    applyEnemyAttack(enemy, type.attack, `${type.name}の近接攻撃で${type.attack}ダメージ`);
+    return;
+  }
+  moveEnemyTowardPlayer(enemy, area, playerPos);
+}
+
+function performFastTurn(enemy, area, playerPos) {
+  const type = getEnemyType(enemy);
+  if (canAttackNow(enemy, playerPos)) {
+    applyEnemyAttack(enemy, type.attack);
+    return;
+  }
+  moveEnemyTowardPlayer(enemy, area, playerPos);
+  if (canAttackNow(enemy, playerPos)) {
+    applyEnemyAttack(enemy, type.attack, `${type.name}の素早い一撃で${type.attack}ダメージ`);
+    return;
+  }
+  moveEnemyTowardPlayer(enemy, area, playerPos);
+  if (canAttackNow(enemy, playerPos)) applyEnemyAttack(enemy, type.attack, `${type.name}の一撃で${type.attack}ダメージ`);
+}
+
 function performEnemyTurn(enemy, area, playerPos) {
   const type = getEnemyType(enemy);
   enemy.turnCounter = (enemy.turnCounter || 0) + 1;
 
   if (type.behavior === "slow" && enemy.turnCounter % type.actEvery !== 0) return;
 
-  if (type.behavior === "ranged") {
-    moveEnemyTowardPlayer(enemy, area, playerPos);
-    if (canUsePenguinRanged(enemy, area, playerPos)) {
-      addProjectileEffect(enemy.x, enemy.y, playerPos.x, playerPos.y, "🧊");
-      applyEnemyAttack(enemy, type.attack, `${type.name}の氷つぶてで${type.attack}ダメージ`);
-      return;
-    }
-    if (distance(enemy, playerPos) === 1) applyEnemyAttack(enemy, type.attack);
-    return;
-  }
-
-  if (type.behavior === "fast") {
-    let attacked = false;
-    if (distance(enemy, playerPos) === 1) {
-      applyEnemyAttack(enemy, type.attack);
-      return;
-    }
-    moveEnemyTowardPlayer(enemy, area, playerPos);
-    if (distance(enemy, playerPos) === 1 && !attacked) {
-      applyEnemyAttack(enemy, type.attack, `${type.name}の素早い一撃で${type.attack}ダメージ`);
-      attacked = true;
-    }
-    if (!attacked && distance(enemy, playerPos) > 1) moveEnemyTowardPlayer(enemy, area, playerPos);
-    if (!attacked && distance(enemy, playerPos) === 1) applyEnemyAttack(enemy, type.attack, `${type.name}の一撃で${type.attack}ダメージ`);
-    return;
-  }
-
-  moveEnemyTowardPlayer(enemy, area, playerPos);
-  if (distance(enemy, playerPos) === 1) applyEnemyAttack(enemy, type.attack);
+  if (type.behavior === "ranged") return performRangedTurn(enemy, area, playerPos);
+  if (type.behavior === "fast") return performFastTurn(enemy, area, playerPos);
+  return performStandardMeleeTurn(enemy, area, playerPos);
 }
 
 function applyNaturalRecovery(actionType) {
