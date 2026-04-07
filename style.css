@@ -127,20 +127,12 @@ body {
   border-color: rgba(8, 20, 30, 0.7);
 }
 
-.tile-threat::after {
-  box-shadow: inset 0 0 0 2px rgba(255, 88, 88, 0.85);
-}
-
 .tile-focus::after {
   box-shadow: inset 0 0 0 2px rgba(255, 220, 120, 0.95), 0 0 12px rgba(255, 200, 90, 0.65);
 }
 
 .tile-interact::after {
   box-shadow: inset 0 0 0 2px rgba(98, 198, 255, 0.8);
-}
-
-.tile-attack-preview::after {
-  box-shadow: inset 0 0 0 2px rgba(255, 120, 200, 0.9);
 }
 
 .tile-hidden span {
@@ -266,23 +258,43 @@ body {
 .hud-bar {
   display: flex;
   align-items: center;
-  gap: 0.9rem;
+  justify-content: space-between;
+  gap: 0.75rem;
   min-height: 40px;
+}
+
+.hud-left {
+  min-width: 130px;
+}
+
+.hud-dungeon {
+  font-weight: 700;
+}
+
+.hud-floor {
+  color: #c2b9de;
+  font-size: 0.82rem;
+}
+
+.hud-center {
+  display: grid;
+  gap: 0.2rem;
+  width: min(420px, 100%);
+  flex: 1;
 }
 
 .hp-wrap {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  flex: 1;
 }
 
 .hp-bar {
-  height: 18px;
+  height: 14px;
   background: #241f33;
   border: 1px solid #6d5f98;
   border-radius: 999px;
-  flex: 1;
+  width: min(260px, 58vw);
   overflow: hidden;
 }
 
@@ -302,14 +314,39 @@ body {
   background: linear-gradient(90deg, #d14a4a, #ff8e8e);
 }
 
-.hud-hp,
-.hud-pp {
+.oxy-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.oxy-bar {
+  height: 10px;
+  background: #102136;
+  border: 1px solid #3f5f83;
+  border-radius: 999px;
+  width: min(260px, 58vw);
+  overflow: hidden;
+}
+
+.oxy-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2e9fd6, #73dcff);
+}
+
+.hud-hp {
   font-size: 0.85rem;
 }
 
 .hud-oxy {
-  font-weight: 700;
+  font-size: 0.8rem;
   color: #8de8ff;
+}
+
+.hud-right {
+  min-width: 90px;
+  text-align: right;
+  font-weight: 700;
 }
 
 .hud-auto-dot {
