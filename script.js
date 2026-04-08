@@ -58,6 +58,7 @@ const gameState = {
     statusOpen: false,
     lookMode: false,
     lookCursor: null,
+    lastDeathReason: "",
   },
   town: {
     level: 0,
@@ -109,6 +110,13 @@ const logEl = document.querySelector("#log");
 function addLog(msg) {
   gameState.ui.messages.unshift(msg);
   gameState.ui.messages = gameState.ui.messages.slice(0, 2);
+}
+
+function setGameOver(message) {
+  gameState.phase = "gameover";
+  stopAutoLoop();
+  gameState.auto.enabled = false;
+  gameState.ui.messages = [message];
 }
 
 function ensureInventorySize() {
@@ -423,6 +431,7 @@ function startTown() {
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
   gameState.player.facing = "down";
+  gameState.ui.lastDeathReason = "";
   gameState.ui.statusOpen = false;
   updateHint();
 }
@@ -453,6 +462,7 @@ function startRun() {
   };
   gameState.player.facing = "down";
   gameState.ui.statusOpen = false;
+  gameState.ui.lastDeathReason = "";
   resetLookMode();
   updateFov();
   updateHint();
@@ -886,16 +896,17 @@ function enemyTurn() {
       addLog(`復活! HP${CONFIG.reviveHp}`);
       return;
     }
-    gameState.phase = "gameover";
-    stopAutoLoop();
-    gameState.auto.enabled = false;
-    addLog("力尽きた…。");
+    const reason = gameState.ui.lastDeathReason || "力尽きた…。";
+    setGameOver(reason);
   }
 }
 
 function applyEnemyAttack(enemy, damage, text = null) {
   gameState.player.hp -= damage;
-  addLog(text || `${getEnemyType(enemy).name}の攻撃で${damage}ダメージ`);
+  const combatText = text || `${getEnemyType(enemy).name}の攻撃で${damage}ダメージ`;
+  addLog(combatText);
+  const cause = combatText.replace(/で\d+ダメージ.*/, "");
+  gameState.ui.lastDeathReason = `${cause}で倒れた。`;
 }
 
 function moveEnemyTowardPlayer(enemy, area, playerPos) {
@@ -1014,6 +1025,7 @@ function applyNaturalRecovery(actionType) {
 
 function endPlayerTurn(actionType = "") {
   consumeOxygen();
+  if (gameState.phase !== "playing") return;
   applyNaturalRecovery(actionType);
   enemyTurn();
   if (gameState.phase === "playing") {
@@ -1056,10 +1068,14 @@ function consumeOxygen() {
     gameState.player.oxygen = Math.max(0, gameState.player.oxygen - 1);
   }
   if (gameState.player.oxygen <= 0) {
-    gameState.phase = "gameover";
-    stopAutoLoop();
-    gameState.auto.enabled = false;
-    addLog("酸素が尽きた…");
+    const p = currentArea().playerPos;
+    gameState.player.hp -= 1;
+    addDamageEffect(p.x, p.y, "-1");
+    addLog("酸素欠乏でHPが1減った。");
+    if (gameState.player.hp <= 0) {
+      gameState.ui.lastDeathReason = "酸素が尽きて倒れた。";
+      setGameOver(gameState.ui.lastDeathReason);
+    }
   } else if (gameState.player.oxygen <= Math.floor(gameState.player.maxOxygen * 0.25)) {
     addLog("酸素が減っている");
   }
@@ -1138,6 +1154,11 @@ function updateFov() {
   const visible = {};
   const inRoomIndex = roomIndexAt(area, p.x, p.y);
   const lookActive = gameState.ui.lookMode && !!gameState.ui.lookCursor;
+  const markVisible = (x, y) => {
+    const key = tileKey(x, y);
+    visible[key] = true;
+    if (!lookActive) gameState.dungeon.discovered[key] = true;
+  };
   if (inRoomIndex >= 0) {
     const room = area.rooms[inRoomIndex];
     for (let y = room.y - 1; y <= room.y + room.h; y++) {
@@ -1147,9 +1168,7 @@ function updateFov() {
           const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
           if (dist > 4) continue;
         }
-        const key = tileKey(x, y);
-        visible[key] = true;
-        gameState.dungeon.discovered[key] = true;
+        markVisible(x, y);
       }
     }
   } else {
@@ -1159,9 +1178,7 @@ function updateFov() {
         const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
         const isRoomTile = roomIndexAt(area, x, y) >= 0;
         if (dist > 2 && !(isRoomTile && dist <= 3)) continue;
-        const key = tileKey(x, y);
-        visible[key] = true;
-        gameState.dungeon.discovered[key] = true;
+        markVisible(x, y);
       }
     }
   }
@@ -1452,7 +1469,7 @@ function update(action, payload = {}) {
 }
 
 function cameraFor(area) {
-  const p = area.playerPos;
+  const p = gameState.phase === "playing" ? lookOrigin(area) : area.playerPos;
   const halfW = Math.floor(CONFIG.viewport.w / 2);
   const halfH = Math.floor(CONFIG.viewport.h / 2);
   let x0 = p.x - halfW;
@@ -1482,7 +1499,8 @@ function spriteForTile(type, symbol) {
 }
 
 function tileVisual(area, x, y) {
-  if (!isDiscovered(x, y)) return { type: "hidden", symbol: "" };
+  const temporarilyVisibleInLook = gameState.phase === "playing" && gameState.ui.lookMode && isVisible(x, y);
+  if (!isDiscovered(x, y) && !temporarilyVisibleInLook) return { type: "hidden", symbol: "" };
   const p = area.playerPos;
   if (p.x === x && p.y === y) return { type: "player", symbol: "🦭", facing: gameState.player.facing };
 
@@ -1498,7 +1516,7 @@ function tileVisual(area, x, y) {
 
   const obj = objectAt(area, x, y);
   if (obj) {
-    const map = { V: "stairs", X: "stairs", T: "train", R: "rest", D: "gate", B: "board" };
+    const map = { V: "gate", X: "stairs", T: "train", R: "rest", D: "gate", B: "board" };
     const symbols = {
       X: "🚪",
       V: "🌀",
@@ -1661,6 +1679,10 @@ function renderHudBar() {
 
 function renderMessageBox() {
   const [latest = "...", prev = ""] = gameState.ui.messages;
+  if (gameState.phase === "gameover") {
+    logEl.innerHTML = `<div class="message-fixed latest">${latest}</div>`;
+    return;
+  }
   logEl.innerHTML = `
     <div class="message-fixed latest">${latest}</div>
     <div class="message-fixed older">${prev}</div>
