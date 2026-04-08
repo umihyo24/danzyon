@@ -42,10 +42,10 @@ const DIRS = {
 };
 
 const ENEMY_TYPES = {
-  penguin: { id: "penguin", name: "ペンギン", emoji: "🐧", maxHp: 2, attack: 1, behavior: "ranged", range: 5, exp: 2 },
+  penguin: { id: "penguin", name: "ペンギン", emoji: "🐧", maxHp: 2, attack: 1, behavior: "ranged", range: 5, exp: 2, swimmer: true },
   cheetah: { id: "cheetah", name: "チーター", emoji: "🐆", maxHp: 3, attack: 1, behavior: "fast", speed: 2, exp: 4 },
   elephant: { id: "elephant", name: "ゾウ", emoji: "🦣", maxHp: 6, attack: 1, behavior: "slow", actEvery: 2, exp: 6 },
-  hippo: { id: "hippo", name: "カバ", emoji: "🦛", maxHp: 4, attack: 2, behavior: "heavy", exp: 5 },
+  hippo: { id: "hippo", name: "カバ", emoji: "🦛", maxHp: 4, attack: 2, behavior: "heavy", exp: 5, swimmer: true },
 };
 
 const gameState = {
@@ -83,6 +83,7 @@ const gameState = {
     level: 1,
     exp: 0,
     nextExp: CONFIG.expBaseNext,
+    equipment: [],
   },
   mission: {
     targetItemName: "魚",
@@ -309,6 +310,8 @@ function makeDungeonFloor(depth = 1) {
     y: c.y,
   }));
   area.items.push(...fishSpots);
+  area.items.push({ type: "TENGU", x: centers[3].x - 2, y: centers[3].y + 1 });
+  area.items.push({ type: "MIZU", x: centers[2].x - 1, y: centers[2].y + 2 });
 
   const enemySpawns = [
     { pos: centers[1], typeId: "penguin" },
@@ -331,6 +334,29 @@ function makeDungeonFloor(depth = 1) {
   return area;
 }
 
+function hasRouteToStairs(area) {
+  const start = area.startPos || area.playerPos;
+  const goal = area.objects.find((o) => o.type === "V");
+  if (!start || !goal) return true;
+  const seen = new Set([tileKey(start.x, start.y)]);
+  const q = [{ x: start.x, y: start.y }];
+  while (q.length) {
+    const cur = q.shift();
+    if (cur.x === goal.x && cur.y === goal.y) return true;
+    for (const d of Object.values(DIRS)) {
+      const nx = cur.x + d.x;
+      const ny = cur.y + d.y;
+      const key = tileKey(nx, ny);
+      if (seen.has(key)) continue;
+      const tile = tileAt(area, nx, ny);
+      if (tile === "wall" || tile === "hole" || tile === "water") continue;
+      seen.add(key);
+      q.push({ x: nx, y: ny });
+    }
+  }
+  return false;
+}
+
 function decorateDungeonTiles(area, centers) {
   const poisonSpots = [
     { x: centers[1].x - 1, y: centers[1].y + 1 },
@@ -345,6 +371,24 @@ function decorateDungeonTiles(area, centers) {
   ];
   waterSpots.forEach((p) => {
     if (tileAt(area, p.x, p.y) === "floor" && !objectAt(area, p.x, p.y)) area.tiles[p.y][p.x] = "water";
+  });
+
+  const terrainChains = [
+    { type: "hole", points: [{ x: 6, y: 16 }, { x: 7, y: 16 }, { x: 8, y: 16 }, { x: 8, y: 17 }] },
+    { type: "hole", points: [{ x: 22, y: 19 }, { x: 23, y: 19 }, { x: 24, y: 19 }] },
+    { type: "water", points: [{ x: 15, y: 6 }, { x: 16, y: 6 }, { x: 17, y: 6 }, { x: 17, y: 7 }] },
+    { type: "water", points: [{ x: 33, y: 19 }, { x: 34, y: 19 }, { x: 35, y: 19 }, { x: 35, y: 20 }] },
+  ];
+  terrainChains.forEach((chain) => {
+    chain.points.forEach((p) => {
+      if (!inBounds(area, p.x, p.y)) return;
+      if (tileAt(area, p.x, p.y) !== "floor") return;
+      if (objectAt(area, p.x, p.y)) return;
+      const isStart = area.startPos && area.startPos.x === p.x && area.startPos.y === p.y;
+      if (isStart) return;
+      area.tiles[p.y][p.x] = chain.type;
+      if (!hasRouteToStairs(area)) area.tiles[p.y][p.x] = "floor";
+    });
   });
 }
 
@@ -448,6 +492,26 @@ function distance(a, b) {
 
 function getEnemyType(enemy) {
   return ENEMY_TYPES[enemy.typeId] || ENEMY_TYPES.hippo;
+}
+
+function isEquipItemType(type) {
+  return type === "TENGU" || type === "MIZU";
+}
+
+function isEquipped(type) {
+  return gameState.player.equipment.includes(type);
+}
+
+function playerCanTraverse(tile) {
+  if (tile === "hole") return isEquipped("TENGU");
+  if (tile === "water") return isEquipped("TENGU") || isEquipped("MIZU");
+  return true;
+}
+
+function enemyCanTraverse(type, tile) {
+  if (tile === "hole") return !!type.flying;
+  if (tile === "water") return !!type.flying || !!type.swimmer;
+  return true;
 }
 
 function enemyBehaviorText(typeId) {
@@ -593,7 +657,14 @@ function pickupIfAny(area) {
       addLog("持ち物がいっぱいだ。");
       return;
     }
-    gameState.player.inventory[emptyIdx] = { type: it.type, emoji: "🌿", name: "薬草" };
+    const itemDefs = {
+      H: { emoji: "🌿", name: "薬草" },
+      TENGU: { emoji: "💪", name: "テングのチカラ" },
+      MIZU: { emoji: "💪", name: "みずぐものちから" },
+    };
+    const def = itemDefs[it.type] || { emoji: "❔", name: it.type };
+    gameState.player.inventory[emptyIdx] = { type: it.type, emoji: def.emoji, name: def.name };
+    reorderInventoryByEquipment();
     area.items.splice(idx, 1);
     addLog("アイテムを拾った。");
   }
@@ -638,13 +709,49 @@ function useInventoryItem(index, consumeTurn = true) {
     render();
     return;
   }
+  if (isEquipItemType(item.type)) {
+    if (isEquipped(item.type)) {
+      gameState.player.equipment = gameState.player.equipment.filter((t) => t !== item.type);
+      addLog(`${item.name}の装備を外した。`);
+    } else {
+      if (gameState.player.equipment.length >= 2) {
+        addLog("装備は2つまで。");
+        render();
+        return;
+      }
+      gameState.player.equipment.push(item.type);
+      addLog(`${item.name}を装備した。`);
+    }
+    reorderInventoryByEquipment();
+    render();
+    return;
+  }
+
   if (item.type === "H") {
     gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 2);
     addLog("薬草を使って回復した。");
   }
   gameState.player.inventory[index] = null;
   if (consumeTurn && gameState.phase === "playing") endPlayerTurn("item");
+  reorderInventoryByEquipment();
   render();
+}
+
+function reorderInventoryByEquipment() {
+  const equippedSlots = [];
+  const others = [];
+  gameState.player.equipment.forEach((type) => {
+    const slot = gameState.player.inventory.find((it) => it && it.type === type);
+    if (slot) equippedSlots.push(slot);
+  });
+  gameState.player.inventory.forEach((slot) => {
+    if (!slot) return;
+    if (gameState.player.equipment.includes(slot.type)) return;
+    others.push(slot);
+  });
+  const next = [...equippedSlots, ...others];
+  while (next.length < CONFIG.inventorySlots) next.push(null);
+  gameState.player.inventory = next.slice(0, CONFIG.inventorySlots);
 }
 
 function tryMovePlayer(dx, dy) {
@@ -656,8 +763,13 @@ function tryMovePlayer(dx, dy) {
   const ny = p.y + dy;
   updateFacing(dx, dy);
 
-  if (tileAt(area, nx, ny) === "wall") {
+  const targetTile = tileAt(area, nx, ny);
+  if (targetTile === "wall") {
     addLog("壁で進めない。");
+    return false;
+  }
+  if (!playerCanTraverse(targetTile)) {
+    addLog(targetTile === "hole" ? "穴を越えられない。" : "水に入れない。");
     return false;
   }
 
@@ -792,7 +904,11 @@ function moveEnemyTowardPlayer(enemy, area, playerPos) {
     { x: enemy.x, y: enemy.y + Math.sign(playerPos.y - enemy.y) },
   ];
   const next = options.find(
-    (c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y) && !(c.x === playerPos.x && c.y === playerPos.y)
+    (c) =>
+      tileAt(area, c.x, c.y) !== "wall" &&
+      enemyCanTraverse(getEnemyType(enemy), tileAt(area, c.x, c.y)) &&
+      !enemyAt(area, c.x, c.y) &&
+      !(c.x === playerPos.x && c.y === playerPos.y)
   );
   if (!next) return false;
   if (next.x !== enemy.x) enemy.facing = next.x < enemy.x ? -1 : 1;
@@ -1021,22 +1137,28 @@ function updateFov() {
   const p = lookOrigin(area);
   const visible = {};
   const inRoomIndex = roomIndexAt(area, p.x, p.y);
+  const lookActive = gameState.ui.lookMode && !!gameState.ui.lookCursor;
   if (inRoomIndex >= 0) {
     const room = area.rooms[inRoomIndex];
     for (let y = room.y - 1; y <= room.y + room.h; y++) {
       for (let x = room.x - 1; x <= room.x + room.w; x++) {
         if (!inBounds(area, x, y)) continue;
+        if (lookActive) {
+          const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
+          if (dist > 4) continue;
+        }
         const key = tileKey(x, y);
         visible[key] = true;
         gameState.dungeon.discovered[key] = true;
       }
     }
   } else {
-    for (let y = p.y - 2; y <= p.y + 2; y++) {
-      for (let x = p.x - 2; x <= p.x + 2; x++) {
+    for (let y = p.y - 3; y <= p.y + 3; y++) {
+      for (let x = p.x - 3; x <= p.x + 3; x++) {
         if (!inBounds(area, x, y)) continue;
         const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
-        if (dist > 2) continue;
+        const isRoomTile = roomIndexAt(area, x, y) >= 0;
+        if (dist > 2 && !(isRoomTile && dist <= 3)) continue;
         const key = tileKey(x, y);
         visible[key] = true;
         gameState.dungeon.discovered[key] = true;
@@ -1155,7 +1277,8 @@ function stepToward(area, from, target) {
   return candidates.find((c) => {
     const nx = from.x + c.dx;
     const ny = from.y + c.dy;
-    return tileAt(area, nx, ny) !== "wall" && !enemyAt(area, nx, ny);
+    const tile = tileAt(area, nx, ny);
+    return tile !== "wall" && playerCanTraverse(tile) && !enemyAt(area, nx, ny);
   }) || null;
 }
 
@@ -1163,7 +1286,10 @@ function getFallbackAutoMove(area, from, failedDir = null) {
   const dirs = Object.values(DIRS).filter((d) => !failedDir || d.x !== failedDir.x || d.y !== failedDir.y);
   const candidates = dirs
     .map((d) => ({ dir: d, x: from.x + d.x, y: from.y + d.y }))
-    .filter((c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y));
+    .filter((c) => {
+      const tile = tileAt(area, c.x, c.y);
+      return tile !== "wall" && playerCanTraverse(tile) && !enemyAt(area, c.x, c.y);
+    });
   candidates.sort((a, b) => {
     const aScore = (itemAt(area, a.x, a.y) ? 3 : 0) + (!isDiscovered(a.x, a.y) ? 2 : 0) + (objectAt(area, a.x, a.y) ? 1 : 0);
     const bScore = (itemAt(area, b.x, b.y) ? 3 : 0) + (!isDiscovered(b.x, b.y) ? 2 : 0) + (objectAt(area, b.x, b.y) ? 1 : 0);
@@ -1387,10 +1513,11 @@ function tileVisual(area, x, y) {
   }
 
   const tile = tileAt(area, x, y);
-  if (tile === "wall") return { type: "wall", symbol: "■", facing: "right" };
+  if (tile === "wall") return { type: "wall", symbol: "", facing: "right" };
   if (tile === "poison") return { type: "floor", symbol: "☣️", facing: "right" };
-  if (tile === "water") return { type: "floor", symbol: "≈", facing: "right" };
-  return { type: "floor", symbol: "·", facing: "right" };
+  if (tile === "hole") return { type: "floor", symbol: "🕳️", facing: "right" };
+  if (tile === "water") return { type: "floor", symbol: "💧", facing: "right" };
+  return { type: "floor", symbol: "", facing: "right" };
 }
 
 function renderLeftPanel(area, cam, hint) {
@@ -1414,7 +1541,7 @@ function renderRightPanel() {
   const slotsHtml = gameState.player.inventory
     .map(
       (slot, idx) =>
-        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う"><span class="item-icon">${slot ? slot.emoji : "・"}</span><span class="item-name">${slot ? slot.name : "空き"}</span></button>`
+        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う"><span class="item-equip">${slot && isEquipped(slot.type) ? "E" : ""}</span><span class="item-icon">${slot ? slot.emoji : "・"}</span><span class="item-name">${slot ? slot.name : "空き"}</span></button>`
     )
     .join("");
   return `<aside class="side-panel right-panel"><div class="slot-list">${slotsHtml}</div></aside>`;
@@ -1482,10 +1609,10 @@ function renderMiniMap(area, cam) {
   for (let y = 0; y < area.height; y++) {
     for (let x = 0; x < area.width; x++) {
       const discovered = isDiscovered(x, y);
-      const kind = !discovered ? "unknown" : tileAt(area, x, y) === "wall" ? "wall" : "floor";
+      const t = tileAt(area, x, y);
+      const kind = !discovered ? "unknown" : t === "wall" ? "wall" : t === "water" ? "water" : t === "hole" ? "hole" : "floor";
       const current = x === area.playerPos.x && y === area.playerPos.y ? " player" : "";
-      const focus = x >= cam.x0 && x < cam.x0 + cam.w && y >= cam.y0 && y < cam.y0 + cam.h ? " cam" : "";
-      dots += `<span class="mini-dot ${kind}${current}${focus}"></span>`;
+      dots += `<span class="mini-dot ${kind}${current}"></span>`;
     }
   }
   return `<div class="minimap" style="grid-template-columns:repeat(${area.width},5px)">${dots}</div>`;

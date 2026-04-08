@@ -101,6 +101,8 @@ body {
 .sym-stairs { color: #ffd878; }
 .sym-floor,
 .sym-wall { color: #9aa0a6; }
+.sym-floor { font-size: 0.95rem; }
+.sym-wall { font-size: 0.9rem; }
 
 .flip-x {
   --flip: -1;
@@ -141,6 +143,30 @@ body {
 
 .tile-hidden span {
   opacity: 0;
+}
+
+.tile .sym-floor:empty,
+.tile .sym-wall:empty {
+  display: none;
+}
+
+.tile .sym-wall {
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  background:
+    linear-gradient(180deg, rgba(54, 79, 96, 0.9), rgba(24, 42, 58, 0.95)),
+    repeating-linear-gradient(45deg, rgba(80, 120, 150, 0.2) 0 3px, rgba(20, 36, 48, 0.2) 3px 6px);
+  box-shadow: inset 0 0 0 1px rgba(145, 180, 205, 0.2);
+}
+
+.tile .sym-floor {
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(72, 111, 137, 0.35), transparent 45%),
+    linear-gradient(180deg, rgba(19, 45, 62, 0.3), rgba(8, 24, 34, 0.45));
 }
 
 @keyframes player-idle {
@@ -241,6 +267,13 @@ body {
 
 .item-icon {
   width: 1.2rem;
+  text-align: center;
+}
+
+.item-equip {
+  width: 0.9rem;
+  color: #9ef5b0;
+  font-weight: 800;
   text-align: center;
 }
 
@@ -474,8 +507,9 @@ button:hover { background: #4b3f68; }
 .mini-dot.unknown { background: #0b1922; }
 .mini-dot.wall { background: #32414a; }
 .mini-dot.floor { background: #3a6781; }
+.mini-dot.water { background: #2d8ec8; }
+.mini-dot.hole { background: #0c0f15; box-shadow: inset 0 0 0 1px #495163; }
 .mini-dot.player { background: #9effba; }
-.mini-dot.cam { box-shadow: 0 0 0 1px rgba(241, 214, 141, 0.65) inset; }
 
 .enemy-info-fixed {
   min-height: 96px;
