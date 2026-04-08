@@ -94,6 +94,16 @@ body {
   transform: scaleX(var(--flip));
 }
 
+.facing-indicator {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 0.78rem;
+  color: #d8f2ff;
+  text-shadow: 0 0 4px rgba(5, 15, 28, 0.95);
+  pointer-events: none;
+}
+
 .sym-player,
 .sym-heal { color: #9ef5b0; }
 .sym-enemy { color: #ff8f8f; }

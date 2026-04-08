@@ -168,9 +168,11 @@ const gameState = {
     effects: [],
     hoverEnemy: null,
     statusOpen: false,
-    lookMode: false,
     lookCursor: null,
     lastDeathReason: "",
+  },
+  input: {
+    lookMode: false,
   },
   town: {
     level: 0,
@@ -186,7 +188,7 @@ const gameState = {
     maxPp: 3,
     pp: 3,
     reviveUsed: false,
-    facing: "right",
+    facing: { x: 1, y: 0 },
     inventory: [],
     maxOxygen: 100,
     oxygen: 100,
@@ -549,7 +551,7 @@ function startTown() {
   gameState.town.map.playerPos = { x: 17, y: 11 };
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
-  gameState.player.facing = "down";
+  gameState.player.facing = { x: 0, y: 1 };
   gameState.ui.lastDeathReason = "";
   gameState.ui.statusOpen = false;
   updateHint();
@@ -580,7 +582,7 @@ function startRun() {
     lastPressureTurn: 0,
     visitedRooms: {},
   };
-  gameState.player.facing = "down";
+  gameState.player.facing = { x: 0, y: 1 };
   gameState.ui.statusOpen = false;
   gameState.ui.lastDeathReason = "";
   resetLookMode();
@@ -792,20 +794,18 @@ function tileEffectOnStep(area) {
 
 function updateFacing(dx, dy) {
   if (dx === 0 && dy === 0) return;
-  if (dx === 1) gameState.player.facing = "right";
-  if (dx === -1) gameState.player.facing = "left";
-  if (dy === 1) gameState.player.facing = "down";
-  if (dy === -1) gameState.player.facing = "up";
+  if (dx !== 0) gameState.player.facing = { x: Math.sign(dx), y: 0 };
+  if (dy !== 0) gameState.player.facing = { x: 0, y: Math.sign(dy) };
 }
 
 function facingToVector() {
-  const map = {
-    up: { x: 0, y: -1 },
-    down: { x: 0, y: 1 },
-    left: { x: -1, y: 0 },
-    right: { x: 1, y: 0 },
-  };
-  return map[gameState.player.facing] || map.right;
+  const f = gameState.player.facing;
+  if (!f) return { x: 1, y: 0 };
+  if (f.x === 1) return { x: 1, y: 0 };
+  if (f.x === -1) return { x: -1, y: 0 };
+  if (f.y === 1) return { x: 0, y: 1 };
+  if (f.y === -1) return { x: 0, y: -1 };
+  return { x: 1, y: 0 };
 }
 
 function useInventoryItem(index, consumeTurn = true) {
@@ -863,7 +863,7 @@ function reorderInventoryByEquipment() {
 function tryMovePlayer(dx, dy) {
   const area = currentArea();
   if (!area) return false;
-  if (gameState.phase === "playing" && gameState.ui.lookMode) resetLookMode();
+  if (gameState.phase === "playing" && gameState.input.lookMode) resetLookMode();
   const p = area.playerPos;
   const nx = p.x + dx;
   const ny = p.y + dy;
@@ -1240,7 +1240,7 @@ function updateFov() {
   const p = lookOrigin(area);
   const visible = {};
   const inRoomIndex = roomIndexAt(area, area.playerPos.x, area.playerPos.y);
-  const lookActive = gameState.ui.lookMode && !!gameState.ui.lookCursor;
+  const lookActive = gameState.input.lookMode && !!gameState.ui.lookCursor;
   const markVisible = (x, y) => {
     const key = tileKey(x, y);
     visible[key] = true;
@@ -1302,43 +1302,37 @@ function roomIndexAt(area, x, y) {
 }
 
 function resetLookMode() {
-  gameState.ui.lookMode = false;
+  gameState.input.lookMode = false;
   gameState.ui.lookCursor = null;
 }
 
 function lookOrigin(area) {
-  if (gameState.phase !== "playing" || !gameState.ui.lookMode || !gameState.ui.lookCursor) return area.playerPos;
+  if (gameState.phase !== "playing" || !gameState.input.lookMode || !gameState.ui.lookCursor) return area.playerPos;
   return gameState.ui.lookCursor;
 }
 
 function toggleLookMode() {
-  if (gameState.phase !== "playing") return;
-  const area = currentArea();
-  const p = area.playerPos;
-  const roomIndex = roomIndexAt(area, p.x, p.y);
-  if (roomIndex < 0) {
-    addLog("通路では見渡しできない。");
+  if (gameState.phase !== "town" && gameState.phase !== "playing") return;
+  if (gameState.input.lookMode) {
     resetLookMode();
-    updateFov();
-    render();
-    return;
+  } else {
+    gameState.input.lookMode = true;
   }
-  if (gameState.ui.lookMode) {
-    resetLookMode();
-    addLog("見渡しを終了。");
-    updateFov();
-    render();
-    return;
-  }
-  gameState.ui.lookMode = true;
-  gameState.ui.lookCursor = { x: p.x, y: p.y };
-  addLog("見渡し開始。矢印で視点移動");
+  if (gameState.phase === "playing") updateFov();
+  render();
+}
+
+function setLookMode(active) {
+  const enabled = !!active;
+  if (gameState.phase !== "town" && gameState.phase !== "playing") return;
+  if (gameState.input.lookMode === enabled) return;
+  gameState.input.lookMode = enabled;
   updateFov();
   render();
 }
 
 function moveLookCursor(dx, dy) {
-  if (gameState.phase !== "playing" || !gameState.ui.lookMode || !gameState.ui.lookCursor) return false;
+  if (gameState.phase !== "playing" || !gameState.input.lookMode || !gameState.ui.lookCursor) return false;
   const area = currentArea();
   const cursor = gameState.ui.lookCursor;
   const nx = cursor.x + dx;
@@ -1518,15 +1512,15 @@ function update(action, payload = {}) {
   }
   if (action === "INTERACT" && (gameState.phase === "town" || gameState.phase === "playing")) interactNearest();
   if (action === "SPECIAL" && gameState.phase === "playing") {
-    if (gameState.ui.lookMode) resetLookMode();
+    if (gameState.input.lookMode) resetLookMode();
     useSpecial();
   }
   if (action === "WAIT" && gameState.phase === "playing") {
-    if (gameState.ui.lookMode) resetLookMode();
+    if (gameState.input.lookMode) resetLookMode();
     performWait();
   }
   if (action === "ATTACK" && gameState.phase === "playing") {
-    if (gameState.ui.lookMode) resetLookMode();
+    if (gameState.input.lookMode) resetLookMode();
     performForwardAttack();
   }
   if (action === "TOGGLE_LOOK" && gameState.phase === "playing") toggleLookMode();
@@ -1593,18 +1587,29 @@ function getTileClassNames({ vis, x, y, focusEnemy, area, objHere, itemHere }) {
   if (vis.type === "hidden") classes.push("tile-hidden");
   if (focusEnemy && focusEnemy.x === x && focusEnemy.y === y) classes.push("tile-focus");
   if ((objHere && distance(objHere, area.playerPos) <= 1) || (itemHere && distance(itemHere, area.playerPos) <= 1)) classes.push("tile-interact");
-  if (gameState.ui.lookMode && gameState.ui.lookCursor?.x === x && gameState.ui.lookCursor?.y === y) classes.push("tile-look-cursor");
+  if (gameState.input.lookMode && gameState.ui.lookCursor?.x === x && gameState.ui.lookCursor?.y === y) classes.push("tile-look-cursor");
   return classes.join(" ");
 }
 
 function buildTileHtml({ className, x, y, sprite, tip, vis }) {
-  const flipClass = vis.facing === "left" || vis.facing === -1 ? "flip-x" : "";
+  const flipClass = vis.facing === -1 || vis.facing?.x === -1 ? "flip-x" : "";
   const symbolHtml = shouldShowTileSymbol(vis, sprite) ? `<span class="${flipClass} sym-${vis.type}">${vis.symbol}</span>` : "";
-  return `<div class="${className}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}>${symbolHtml}</div>`;
+  const facingHtml = vis.type === "player" ? renderFacingIndicator() : "";
+  return `<div class="${className}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}>${symbolHtml}${facingHtml}</div>`;
+}
+
+function renderFacingIndicator() {
+  if (!gameState.input.lookMode) return "";
+  const f = facingToVector();
+  let arrow = "→";
+  if (f.x === -1) arrow = "←";
+  if (f.y === -1) arrow = "↑";
+  if (f.y === 1) arrow = "↓";
+  return `<span class="facing-indicator">${arrow}</span>`;
 }
 
 function tileVisual(area, x, y) {
-  const temporarilyVisibleInLook = gameState.phase === "playing" && gameState.ui.lookMode && isVisible(x, y);
+  const temporarilyVisibleInLook = gameState.phase === "playing" && gameState.input.lookMode && isVisible(x, y);
   if (!isDiscovered(x, y) && !temporarilyVisibleInLook) return { type: "hidden", symbol: "" };
   const p = area.playerPos;
   if (p.x === x && p.y === y) return { type: "player", symbol: "🦭", facing: gameState.player.facing };
@@ -1900,11 +1905,16 @@ viewEl.addEventListener("mouseleave", () => {
 window.addEventListener("keydown", (e) => {
   if (DIRS[e.key] && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
-    if (gameState.phase === "playing" && gameState.ui.lookMode) {
-      moveLookCursor(DIRS[e.key].x, DIRS[e.key].y);
+    if (gameState.input.lookMode) {
+      updateFacing(DIRS[e.key].x, DIRS[e.key].y);
+      render();
       return;
     }
     update("MOVE", { dx: DIRS[e.key].x, dy: DIRS[e.key].y });
+  }
+  if (e.key === "Shift" && (gameState.phase === "town" || gameState.phase === "playing")) {
+    e.preventDefault();
+    setLookMode(true);
   }
   if ((e.key === "e" || e.key === "E") && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
@@ -1945,6 +1955,13 @@ window.addEventListener("keydown", (e) => {
   if ((e.key === "c" || e.key === "C") && gameState.phase === "playing") {
     e.preventDefault();
     update("TOGGLE_LOOK");
+  }
+});
+
+window.addEventListener("keyup", (e) => {
+  if (e.key === "Shift" && (gameState.phase === "town" || gameState.phase === "playing")) {
+    e.preventDefault();
+    setLookMode(false);
   }
 });
 
