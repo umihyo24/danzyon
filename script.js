@@ -23,6 +23,10 @@ const CONFIG = {
 const ASSETS = {
   floor: "assets/floor.png",
   wall: "assets/wall.png",
+  floor_cave: "assets/floor_cave.png",
+  wall_cave: "assets/wall_cave.png",
+  floor_ice: "assets/floor_ice.png",
+  wall_ice: "assets/wall_ice.png",
   player: "assets/player.png",
   enemy: "assets/enemy.png",
   item: "assets/item.png",
@@ -39,6 +43,17 @@ const DIRS = {
   ArrowDown: { x: 0, y: 1 },
   ArrowLeft: { x: -1, y: 0 },
   ArrowRight: { x: 1, y: 0 },
+};
+
+const DUNGEON_THEMES = {
+  cave: {
+    floor: "floor_cave",
+    wall: "wall_cave",
+  },
+  ice: {
+    floor: "floor_ice",
+    wall: "wall_ice",
+  },
 };
 
 const ENEMY_TYPES = {
@@ -271,6 +286,10 @@ function loadAssets() {
   const fallback = {
     floor: makePlaceholder("·", "#1d3f4b"),
     wall: makePlaceholder("■", "#0b1d28"),
+    floor_cave: makePlaceholder("·", "#1d3f4b"),
+    wall_cave: makePlaceholder("■", "#0b1d28"),
+    floor_ice: makePlaceholder("·", "#2f5268"),
+    wall_ice: makePlaceholder("■", "#173246"),
     player: makePlaceholder("@", "#355f2f"),
     enemy: makePlaceholder("M", "#6a2f2f"),
     item: makePlaceholder("🐟", "#6b5d1f"),
@@ -549,6 +568,7 @@ function startRun() {
   gameState.mission.retrieved = false;
   gameState.dungeon = {
     floor: makeDungeonFloor(1),
+    theme: "cave",
     hint: "",
     turn: 1,
     unstable: false,
@@ -634,6 +654,19 @@ function enemyBehaviorText(typeId) {
 
 function getObjectTypeDef(type) {
   return OBJECT_TYPES[type] || null;
+}
+
+function currentDungeonThemeDef() {
+  const themeName = gameState.dungeon?.theme || "cave";
+  return DUNGEON_THEMES[themeName] || DUNGEON_THEMES.cave;
+}
+
+function tileAssetKey(type) {
+  if (gameState.phase === "playing" && (type === "floor" || type === "wall")) {
+    const theme = currentDungeonThemeDef();
+    return type === "floor" ? theme.floor : theme.wall;
+  }
+  return type;
 }
 
 function getNaturalRecoveryAmount(level) {
@@ -1529,8 +1562,8 @@ function cameraFor(area) {
 
 function spriteForTile(type, symbol) {
   const map = {
-    floor: "floor",
-    wall: "wall",
+    floor: tileAssetKey("floor"),
+    wall: tileAssetKey("wall"),
     player: "player",
     enemy: "enemy",
     item: "item",
