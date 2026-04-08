@@ -56,6 +56,8 @@ const gameState = {
     effects: [],
     hoverEnemy: null,
     statusOpen: false,
+    lookMode: false,
+    lookCursor: null,
   },
   town: {
     level: 0,
@@ -280,7 +282,7 @@ function makeDungeonFloor(depth = 1) {
   const area = createArea(CONFIG.floor.w, CONFIG.floor.h);
   const rooms = [
     { x: 2, y: 2, w: 8, h: 6 },
-    { x: 14, y: 3, w: 9, h: 7 },
+    { x: 13, y: 2, w: 12, h: 10 },
     { x: 28, y: 2, w: 9, h: 6 },
     { x: 4, y: 13, w: 10, h: 8 },
     { x: 19, y: 14, w: 8, h: 8 },
@@ -365,6 +367,7 @@ function makeTownMap() {
 
 function startTown() {
   stopAutoLoop();
+  resetLookMode();
   gameState.auto.enabled = false;
   gameState.auto.stuckTurns = 0;
   gameState.auto.targetKey = "";
@@ -406,6 +409,7 @@ function startRun() {
   };
   gameState.player.facing = "down";
   gameState.ui.statusOpen = false;
+  resetLookMode();
   updateFov();
   updateHint();
   addLog("潜水開始。魚を集めて帰還しよう。");
@@ -646,6 +650,7 @@ function useInventoryItem(index, consumeTurn = true) {
 function tryMovePlayer(dx, dy) {
   const area = currentArea();
   if (!area) return false;
+  if (gameState.phase === "playing" && gameState.ui.lookMode) resetLookMode();
   const p = area.playerPos;
   const nx = p.x + dx;
   const ny = p.y + dy;
@@ -963,6 +968,7 @@ function onReturnRun() {
 
 function descendDepth() {
   if (gameState.phase !== "playing") return;
+  resetLookMode();
   gameState.dungeon.depth += 1;
   gameState.dungeon.floor = makeDungeonFloor(gameState.dungeon.depth);
   gameState.dungeon.discovered = {};
@@ -1012,13 +1018,14 @@ function isDiscovered(x, y) {
 function updateFov() {
   if (gameState.phase !== "playing") return;
   const area = currentArea();
-  const p = area.playerPos;
+  const p = lookOrigin(area);
   const visible = {};
   const inRoomIndex = roomIndexAt(area, p.x, p.y);
   if (inRoomIndex >= 0) {
     const room = area.rooms[inRoomIndex];
-    for (let y = room.y; y < room.y + room.h; y++) {
-      for (let x = room.x; x < room.x + room.w; x++) {
+    for (let y = room.y - 1; y <= room.y + room.h; y++) {
+      for (let x = room.x - 1; x <= room.x + room.w; x++) {
+        if (!inBounds(area, x, y)) continue;
         const key = tileKey(x, y);
         visible[key] = true;
         gameState.dungeon.discovered[key] = true;
@@ -1042,7 +1049,7 @@ function updateFov() {
 function isEnemyVisibleAt(area, x, y) {
   if (gameState.phase !== "playing") return true;
   if (!isVisible(x, y)) return false;
-  const p = area.playerPos;
+  const p = lookOrigin(area);
   const playerRoomIndex = roomIndexAt(area, p.x, p.y);
   if (playerRoomIndex >= 0) {
     const enemyRoomIndex = roomIndexAt(area, x, y);
@@ -1070,6 +1077,58 @@ function autoTargetKey(action, area, p) {
 function roomIndexAt(area, x, y) {
   if (!area.rooms) return -1;
   return area.rooms.findIndex((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+}
+
+function resetLookMode() {
+  gameState.ui.lookMode = false;
+  gameState.ui.lookCursor = null;
+}
+
+function lookOrigin(area) {
+  if (gameState.phase !== "playing" || !gameState.ui.lookMode || !gameState.ui.lookCursor) return area.playerPos;
+  return gameState.ui.lookCursor;
+}
+
+function toggleLookMode() {
+  if (gameState.phase !== "playing") return;
+  const area = currentArea();
+  const p = area.playerPos;
+  const roomIndex = roomIndexAt(area, p.x, p.y);
+  if (roomIndex < 0) {
+    addLog("通路では見渡しできない。");
+    resetLookMode();
+    updateFov();
+    render();
+    return;
+  }
+  if (gameState.ui.lookMode) {
+    resetLookMode();
+    addLog("見渡しを終了。");
+    updateFov();
+    render();
+    return;
+  }
+  gameState.ui.lookMode = true;
+  gameState.ui.lookCursor = { x: p.x, y: p.y };
+  addLog("見渡し開始。矢印で視点移動");
+  updateFov();
+  render();
+}
+
+function moveLookCursor(dx, dy) {
+  if (gameState.phase !== "playing" || !gameState.ui.lookMode || !gameState.ui.lookCursor) return false;
+  const area = currentArea();
+  const cursor = gameState.ui.lookCursor;
+  const nx = cursor.x + dx;
+  const ny = cursor.y + dy;
+  const currentRoom = roomIndexAt(area, cursor.x, cursor.y);
+  if (currentRoom < 0) return false;
+  if (roomIndexAt(area, nx, ny) !== currentRoom) return false;
+  cursor.x = nx;
+  cursor.y = ny;
+  updateFov();
+  render();
+  return true;
 }
 
 function onEnterRoom(area, x, y) {
@@ -1232,9 +1291,19 @@ function update(action, payload = {}) {
     tryMovePlayer(payload.dx, payload.dy);
   }
   if (action === "INTERACT" && (gameState.phase === "town" || gameState.phase === "playing")) interactNearest();
-  if (action === "SPECIAL" && gameState.phase === "playing") useSpecial();
-  if (action === "WAIT" && gameState.phase === "playing") performWait();
-  if (action === "ATTACK" && gameState.phase === "playing") performForwardAttack();
+  if (action === "SPECIAL" && gameState.phase === "playing") {
+    if (gameState.ui.lookMode) resetLookMode();
+    useSpecial();
+  }
+  if (action === "WAIT" && gameState.phase === "playing") {
+    if (gameState.ui.lookMode) resetLookMode();
+    performWait();
+  }
+  if (action === "ATTACK" && gameState.phase === "playing") {
+    if (gameState.ui.lookMode) resetLookMode();
+    performForwardAttack();
+  }
+  if (action === "TOGGLE_LOOK" && gameState.phase === "playing") toggleLookMode();
 
   if (action === "RESTART") {
     gameState.mission.retrieved = false;
@@ -1377,7 +1446,8 @@ function renderBoard(area, cam) {
       const itemHere = itemAt(area, x, y);
       const focusClass = focusEnemy && focusEnemy.x === x && focusEnemy.y === y ? " tile-focus" : "";
       const interactClass = (objHere && distance(objHere, area.playerPos) <= 1) || (itemHere && distance(itemHere, area.playerPos) <= 1) ? " tile-interact" : "";
-      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}${focusClass}${interactClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}><span class="${flipClass} sym-${vis.type}">${vis.symbol}</span></div>`;
+      const lookClass = gameState.ui.lookMode && gameState.ui.lookCursor?.x === x && gameState.ui.lookCursor?.y === y ? " tile-look-cursor" : "";
+      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}${focusClass}${interactClass}${lookClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}><span class="${flipClass} sym-${vis.type}">${vis.symbol}</span></div>`;
     }
   }
 
@@ -1482,6 +1552,7 @@ function renderActionBar() {
         <button data-action='ATTACK'>Z</button>
         <button data-action='SPECIAL'>X</button>
         <button data-action='WAIT'>Space</button>
+        <button data-action='TOGGLE_LOOK'>C</button>
       </div>
       <div class="control-group auto-group">
         <button data-action='TOGGLE_AUTO'>Q</button>
@@ -1589,6 +1660,10 @@ viewEl.addEventListener("mouseleave", () => {
 window.addEventListener("keydown", (e) => {
   if (DIRS[e.key] && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
+    if (gameState.phase === "playing" && gameState.ui.lookMode) {
+      moveLookCursor(DIRS[e.key].x, DIRS[e.key].y);
+      return;
+    }
     update("MOVE", { dx: DIRS[e.key].x, dy: DIRS[e.key].y });
   }
   if ((e.key === "e" || e.key === "E") && (gameState.phase === "town" || gameState.phase === "playing")) {
@@ -1626,6 +1701,10 @@ window.addEventListener("keydown", (e) => {
   if ((e.key === "p" || e.key === "P") && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
     update("TOGGLE_STATUS");
+  }
+  if ((e.key === "c" || e.key === "C") && gameState.phase === "playing") {
+    e.preventDefault();
+    update("TOGGLE_LOOK");
   }
 });
 
