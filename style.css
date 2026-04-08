@@ -18,17 +18,17 @@ body {
 }
 
 .app {
-  max-width: 1220px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 0.5rem;
+  padding: 0.4rem;
 }
 
 #hud, #view, #controls, #log {
   background: var(--panel);
   border: 1px solid #3d3657;
   border-radius: 8px;
-  padding: 0.4rem 0.55rem;
-  margin-bottom: 0.35rem;
+  padding: 0.32rem 0.48rem;
+  margin-bottom: 0.28rem;
 }
 
 #view.town-upgraded {
@@ -109,14 +109,14 @@ body {
 }
 
 .player-tile .sym-player {
-  transform: scale(1.35);
-  text-shadow: 0 0 10px #c6ffdf, 0 0 18px #9ef5b0, 0 0 3px #000;
+  transform: scale(1.22);
+  text-shadow: 0 0 5px rgba(158, 245, 176, 0.45), 0 0 2px #000;
   animation: player-idle 1.25s ease-in-out infinite;
 }
 
 .player-tile {
-  outline: 2px solid rgba(170, 255, 190, 1);
-  box-shadow: 0 0 14px rgba(130, 255, 170, 0.95);
+  outline: 2px solid rgba(170, 255, 190, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(170, 255, 190, 0.28);
 }
 
 .tile-memory {
@@ -130,11 +130,11 @@ body {
 }
 
 .tile-focus::after {
-  box-shadow: inset 0 0 0 2px rgba(255, 220, 120, 0.95), 0 0 12px rgba(255, 200, 90, 0.65);
+  box-shadow: inset 0 0 0 2px rgba(255, 220, 120, 0.9), inset 0 0 0 4px rgba(255, 220, 120, 0.2);
 }
 
 .tile-interact::after {
-  box-shadow: inset 0 0 0 2px rgba(98, 198, 255, 0.8);
+  box-shadow: inset 0 0 0 2px rgba(98, 198, 255, 0.72);
 }
 
 .tile-look-cursor::after {
@@ -180,10 +180,10 @@ body {
 
 .battle-layout {
   display: grid;
-  grid-template-columns: 190px auto 200px;
-  gap: 10px;
+  grid-template-columns: 156px minmax(0, 1fr) 168px;
+  gap: 8px;
   align-items: start;
-  justify-content: center;
+  justify-content: stretch;
 }
 
 .side-panel {
@@ -413,13 +413,13 @@ body {
 }
 
 #log {
-  min-height: 46px;
+  min-height: 40px;
   background: rgba(16, 41, 58, 0.78);
 }
 
 .message-fixed {
-  min-height: 20px;
-  line-height: 1.3;
+  min-height: 16px;
+  line-height: 1.2;
   white-space: normal;
   word-break: break-word;
 }
@@ -430,14 +430,14 @@ body {
 }
 
 .message-fixed.older {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   color: #b7b0cc;
 }
 
 .controls-row {
   display: flex;
   flex-wrap: nowrap;
-  gap: 0.5rem;
+  gap: 0.35rem;
   align-items: center;
 }
 
@@ -468,7 +468,7 @@ button {
   border-radius: 8px;
   background: #3a3152;
   color: var(--text);
-  padding: 0.35rem 0.5rem;
+  padding: 0.26rem 0.48rem;
   cursor: pointer;
 }
 
