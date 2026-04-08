@@ -1152,7 +1152,7 @@ function updateFov() {
   const area = currentArea();
   const p = lookOrigin(area);
   const visible = {};
-  const inRoomIndex = roomIndexAt(area, p.x, p.y);
+  const inRoomIndex = roomIndexAt(area, area.playerPos.x, area.playerPos.y);
   const lookActive = gameState.ui.lookMode && !!gameState.ui.lookCursor;
   const markVisible = (x, y) => {
     const key = tileKey(x, y);
@@ -1164,10 +1164,6 @@ function updateFov() {
     for (let y = room.y - 1; y <= room.y + room.h; y++) {
       for (let x = room.x - 1; x <= room.x + room.w; x++) {
         if (!inBounds(area, x, y)) continue;
-        if (lookActive) {
-          const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
-          if (dist > 4) continue;
-        }
         markVisible(x, y);
       }
     }
@@ -1516,7 +1512,7 @@ function tileVisual(area, x, y) {
 
   const obj = objectAt(area, x, y);
   if (obj) {
-    const map = { V: "gate", X: "stairs", T: "train", R: "rest", D: "gate", B: "board" };
+    const map = { V: "gate", X: "gate", T: "train", R: "rest", D: "gate", B: "board" };
     const symbols = {
       X: "🚪",
       V: "🌀",
