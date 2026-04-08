@@ -162,7 +162,7 @@ const OBJECT_TYPES = {
 
 const gameState = {
   phase: "start", // start | town | playing | gameover
-  assets: { images: {}, loaded: false },
+  assets: { images: {}, missing: {}, loaded: false },
   ui: {
     messages: ["ようこそ。"],
     effects: [],
@@ -308,12 +308,14 @@ function loadAssets() {
     const img = new Image();
     img.onload = () => {
       gameState.assets.images[key] = img.src;
+      gameState.assets.missing[key] = false;
       remain -= 1;
       if (remain === 0) gameState.assets.loaded = true;
       render();
     };
     img.onerror = () => {
       gameState.assets.images[key] = fallback[key];
+      gameState.assets.missing[key] = true;
       remain -= 1;
       addLog(`画像不足: ${key} は代替表示を使用`);
       if (remain === 0) gameState.assets.loaded = true;
@@ -1574,9 +1576,10 @@ function spriteForTile(type, symbol) {
     gate: "gate",
     board: "board",
   };
-  const key = map[type] || "floor";
+  const key = map[type] || tileAssetKey("floor");
   const src = gameState.assets.images[key] || "";
-  return { src, symbol };
+  const hasImageAsset = !gameState.assets.missing[key];
+  return { src, symbol, hasImageAsset };
 }
 
 function tileVisual(area, x, y) {
@@ -1666,7 +1669,8 @@ function renderBoard(area, cam) {
       const focusClass = focusEnemy && focusEnemy.x === x && focusEnemy.y === y ? " tile-focus" : "";
       const interactClass = (objHere && distance(objHere, area.playerPos) <= 1) || (itemHere && distance(itemHere, area.playerPos) <= 1) ? " tile-interact" : "";
       const lookClass = gameState.ui.lookMode && gameState.ui.lookCursor?.x === x && gameState.ui.lookCursor?.y === y ? " tile-look-cursor" : "";
-      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}${focusClass}${interactClass}${lookClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}><span class="${flipClass} sym-${vis.type}">${vis.symbol}</span></div>`;
+      const symbolHtml = !sprite.hasImageAsset && vis.symbol ? `<span class="${flipClass} sym-${vis.type}">${vis.symbol}</span>` : "";
+      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}${focusClass}${interactClass}${lookClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}>${symbolHtml}</div>`;
     }
   }
 
