@@ -9,16 +9,14 @@ const CONFIG = {
   specialCost: 1,
   specialRange: 4,
   reviveHp: 2,
-  dangerRadius: 3,
   logLimit: 6,
   lungCapacity: 10,
-  inventorySlots: 10,
+  inventorySlots: 12,
   fishUpgradeBase: 8,
   levelUpHpGain: 1,
   levelUpAtkEvery: 3,
   expBaseNext: 5,
   autoTurnMs: 260,
-  fovRadius: 4,
   pressureEveryTurns: 8,
 };
 
@@ -44,10 +42,10 @@ const DIRS = {
 };
 
 const ENEMY_TYPES = {
-  penguin: { id: "penguin", name: "ペンギン", emoji: "🐧", maxHp: 2, attack: 1, behavior: "ranged", range: 5, exp: 2 },
+  penguin: { id: "penguin", name: "ペンギン", emoji: "🐧", maxHp: 2, attack: 1, behavior: "ranged", range: 5, exp: 2, swimmer: true },
   cheetah: { id: "cheetah", name: "チーター", emoji: "🐆", maxHp: 3, attack: 1, behavior: "fast", speed: 2, exp: 4 },
   elephant: { id: "elephant", name: "ゾウ", emoji: "🦣", maxHp: 6, attack: 1, behavior: "slow", actEvery: 2, exp: 6 },
-  hippo: { id: "hippo", name: "カバ", emoji: "🦛", maxHp: 4, attack: 2, behavior: "heavy", exp: 5 },
+  hippo: { id: "hippo", name: "カバ", emoji: "🦛", maxHp: 4, attack: 2, behavior: "heavy", exp: 5, swimmer: true },
 };
 
 const gameState = {
@@ -57,9 +55,9 @@ const gameState = {
     messages: ["ようこそ。"],
     effects: [],
     hoverEnemy: null,
-    attackMode: false,
     statusOpen: false,
-    hoverTile: null,
+    lookMode: false,
+    lookCursor: null,
   },
   town: {
     level: 0,
@@ -75,7 +73,7 @@ const gameState = {
     maxPp: 3,
     pp: 3,
     reviveUsed: false,
-    facing: 1,
+    facing: "right",
     inventory: [],
     maxOxygen: 100,
     oxygen: 100,
@@ -85,6 +83,7 @@ const gameState = {
     level: 1,
     exp: 0,
     nextExp: CONFIG.expBaseNext,
+    equipment: [],
   },
   mission: {
     targetItemName: "魚",
@@ -92,7 +91,6 @@ const gameState = {
     accepted: false,
   },
   dungeon: null,
-  dangerPreview: "-",
   auto: {
     enabled: false,
     style: "balanced", // aggressive | balanced | cautious
@@ -285,7 +283,7 @@ function makeDungeonFloor(depth = 1) {
   const area = createArea(CONFIG.floor.w, CONFIG.floor.h);
   const rooms = [
     { x: 2, y: 2, w: 8, h: 6 },
-    { x: 14, y: 3, w: 9, h: 7 },
+    { x: 13, y: 2, w: 12, h: 10 },
     { x: 28, y: 2, w: 9, h: 6 },
     { x: 4, y: 13, w: 10, h: 8 },
     { x: 19, y: 14, w: 8, h: 8 },
@@ -312,6 +310,8 @@ function makeDungeonFloor(depth = 1) {
     y: c.y,
   }));
   area.items.push(...fishSpots);
+  area.items.push({ type: "TENGU", x: centers[3].x - 2, y: centers[3].y + 1 });
+  area.items.push({ type: "MIZU", x: centers[2].x - 1, y: centers[2].y + 2 });
 
   const enemySpawns = [
     { pos: centers[1], typeId: "penguin" },
@@ -334,6 +334,29 @@ function makeDungeonFloor(depth = 1) {
   return area;
 }
 
+function hasRouteToStairs(area) {
+  const start = area.startPos || area.playerPos;
+  const goal = area.objects.find((o) => o.type === "V");
+  if (!start || !goal) return true;
+  const seen = new Set([tileKey(start.x, start.y)]);
+  const q = [{ x: start.x, y: start.y }];
+  while (q.length) {
+    const cur = q.shift();
+    if (cur.x === goal.x && cur.y === goal.y) return true;
+    for (const d of Object.values(DIRS)) {
+      const nx = cur.x + d.x;
+      const ny = cur.y + d.y;
+      const key = tileKey(nx, ny);
+      if (seen.has(key)) continue;
+      const tile = tileAt(area, nx, ny);
+      if (tile === "wall" || tile === "hole" || tile === "water") continue;
+      seen.add(key);
+      q.push({ x: nx, y: ny });
+    }
+  }
+  return false;
+}
+
 function decorateDungeonTiles(area, centers) {
   const poisonSpots = [
     { x: centers[1].x - 1, y: centers[1].y + 1 },
@@ -348,6 +371,24 @@ function decorateDungeonTiles(area, centers) {
   ];
   waterSpots.forEach((p) => {
     if (tileAt(area, p.x, p.y) === "floor" && !objectAt(area, p.x, p.y)) area.tiles[p.y][p.x] = "water";
+  });
+
+  const terrainChains = [
+    { type: "hole", points: [{ x: 6, y: 16 }, { x: 7, y: 16 }, { x: 8, y: 16 }, { x: 8, y: 17 }] },
+    { type: "hole", points: [{ x: 22, y: 19 }, { x: 23, y: 19 }, { x: 24, y: 19 }] },
+    { type: "water", points: [{ x: 15, y: 6 }, { x: 16, y: 6 }, { x: 17, y: 6 }, { x: 17, y: 7 }] },
+    { type: "water", points: [{ x: 33, y: 19 }, { x: 34, y: 19 }, { x: 35, y: 19 }, { x: 35, y: 20 }] },
+  ];
+  terrainChains.forEach((chain) => {
+    chain.points.forEach((p) => {
+      if (!inBounds(area, p.x, p.y)) return;
+      if (tileAt(area, p.x, p.y) !== "floor") return;
+      if (objectAt(area, p.x, p.y)) return;
+      const isStart = area.startPos && area.startPos.x === p.x && area.startPos.y === p.y;
+      if (isStart) return;
+      area.tiles[p.y][p.x] = chain.type;
+      if (!hasRouteToStairs(area)) area.tiles[p.y][p.x] = "floor";
+    });
   });
 }
 
@@ -370,6 +411,7 @@ function makeTownMap() {
 
 function startTown() {
   stopAutoLoop();
+  resetLookMode();
   gameState.auto.enabled = false;
   gameState.auto.stuckTurns = 0;
   gameState.auto.targetKey = "";
@@ -380,7 +422,7 @@ function startTown() {
   gameState.town.map.playerPos = { x: 17, y: 11 };
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
-  gameState.player.facing = 1;
+  gameState.player.facing = "down";
   gameState.ui.statusOpen = false;
   updateHint();
 }
@@ -409,9 +451,10 @@ function startRun() {
     lastPressureTurn: 0,
     visitedRooms: {},
   };
+  gameState.player.facing = "down";
   gameState.ui.statusOpen = false;
+  resetLookMode();
   updateFov();
-  updateDangerPreview();
   updateHint();
   addLog("潜水開始。魚を集めて帰還しよう。");
 }
@@ -449,6 +492,26 @@ function distance(a, b) {
 
 function getEnemyType(enemy) {
   return ENEMY_TYPES[enemy.typeId] || ENEMY_TYPES.hippo;
+}
+
+function isEquipItemType(type) {
+  return type === "TENGU" || type === "MIZU";
+}
+
+function isEquipped(type) {
+  return gameState.player.equipment.includes(type);
+}
+
+function playerCanTraverse(tile) {
+  if (tile === "hole") return isEquipped("TENGU");
+  if (tile === "water") return isEquipped("TENGU") || isEquipped("MIZU");
+  return true;
+}
+
+function enemyCanTraverse(type, tile) {
+  if (tile === "hole") return !!type.flying;
+  if (tile === "water") return !!type.flying || !!type.swimmer;
+  return true;
 }
 
 function enemyBehaviorText(typeId) {
@@ -594,7 +657,14 @@ function pickupIfAny(area) {
       addLog("持ち物がいっぱいだ。");
       return;
     }
-    gameState.player.inventory[emptyIdx] = { type: it.type, emoji: "🌿", name: "薬草" };
+    const itemDefs = {
+      H: { emoji: "🌿", name: "薬草" },
+      TENGU: { emoji: "💪", name: "テングのチカラ" },
+      MIZU: { emoji: "💪", name: "みずぐものちから" },
+    };
+    const def = itemDefs[it.type] || { emoji: "❔", name: it.type };
+    gameState.player.inventory[emptyIdx] = { type: it.type, emoji: def.emoji, name: def.name };
+    reorderInventoryByEquipment();
     area.items.splice(idx, 1);
     addLog("アイテムを拾った。");
   }
@@ -614,31 +684,92 @@ function tileEffectOnStep(area) {
   }
 }
 
-function useItemSlot(index) {
+function updateFacing(dx, dy) {
+  if (dx === 0 && dy === 0) return;
+  if (dx === 1) gameState.player.facing = "right";
+  if (dx === -1) gameState.player.facing = "left";
+  if (dy === 1) gameState.player.facing = "down";
+  if (dy === -1) gameState.player.facing = "up";
+}
+
+function facingToVector() {
+  const map = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
+  };
+  return map[gameState.player.facing] || map.right;
+}
+
+function useInventoryItem(index, consumeTurn = true) {
   const item = gameState.player.inventory[index];
   if (!item) {
     addLog("アイテムがない。");
     render();
     return;
   }
+  if (isEquipItemType(item.type)) {
+    if (isEquipped(item.type)) {
+      gameState.player.equipment = gameState.player.equipment.filter((t) => t !== item.type);
+      addLog(`${item.name}の装備を外した。`);
+    } else {
+      if (gameState.player.equipment.length >= 2) {
+        addLog("装備は2つまで。");
+        render();
+        return;
+      }
+      gameState.player.equipment.push(item.type);
+      addLog(`${item.name}を装備した。`);
+    }
+    reorderInventoryByEquipment();
+    render();
+    return;
+  }
+
   if (item.type === "H") {
     gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 2);
     addLog("薬草を使って回復した。");
   }
   gameState.player.inventory[index] = null;
+  if (consumeTurn && gameState.phase === "playing") endPlayerTurn("item");
+  reorderInventoryByEquipment();
   render();
+}
+
+function reorderInventoryByEquipment() {
+  const equippedSlots = [];
+  const others = [];
+  gameState.player.equipment.forEach((type) => {
+    const slot = gameState.player.inventory.find((it) => it && it.type === type);
+    if (slot) equippedSlots.push(slot);
+  });
+  gameState.player.inventory.forEach((slot) => {
+    if (!slot) return;
+    if (gameState.player.equipment.includes(slot.type)) return;
+    others.push(slot);
+  });
+  const next = [...equippedSlots, ...others];
+  while (next.length < CONFIG.inventorySlots) next.push(null);
+  gameState.player.inventory = next.slice(0, CONFIG.inventorySlots);
 }
 
 function tryMovePlayer(dx, dy) {
   const area = currentArea();
   if (!area) return false;
+  if (gameState.phase === "playing" && gameState.ui.lookMode) resetLookMode();
   const p = area.playerPos;
   const nx = p.x + dx;
   const ny = p.y + dy;
-  if (dx !== 0) gameState.player.facing = dx < 0 ? -1 : 1;
+  updateFacing(dx, dy);
 
-  if (tileAt(area, nx, ny) === "wall") {
+  const targetTile = tileAt(area, nx, ny);
+  if (targetTile === "wall") {
     addLog("壁で進めない。");
+    return false;
+  }
+  if (!playerCanTraverse(targetTile)) {
+    addLog(targetTile === "hole" ? "穴を越えられない。" : "水に入れない。");
     return false;
   }
 
@@ -681,10 +812,10 @@ function performWhiffAttack() {
 function performPlayerAttack(dx, dy) {
   const area = currentArea();
   if (!area || gameState.phase !== "playing") return;
+  updateFacing(dx, dy);
   const p = area.playerPos;
   const tx = p.x + dx;
   const ty = p.y + dy;
-  if (dx !== 0) gameState.player.facing = dx < 0 ? -1 : 1;
   const enemy = enemyAt(area, tx, ty);
   if (!enemy) {
     performWhiffAttack();
@@ -699,6 +830,11 @@ function performPlayerAttack(dx, dy) {
     gainExp(getEnemyType(enemy).exp || 0);
   }
   endPlayerTurn("hit");
+}
+
+function performForwardAttack() {
+  const forward = facingToVector();
+  performPlayerAttack(forward.x, forward.y);
 }
 
 function performWait() {
@@ -768,7 +904,11 @@ function moveEnemyTowardPlayer(enemy, area, playerPos) {
     { x: enemy.x, y: enemy.y + Math.sign(playerPos.y - enemy.y) },
   ];
   const next = options.find(
-    (c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y) && !(c.x === playerPos.x && c.y === playerPos.y)
+    (c) =>
+      tileAt(area, c.x, c.y) !== "wall" &&
+      enemyCanTraverse(getEnemyType(enemy), tileAt(area, c.x, c.y)) &&
+      !enemyAt(area, c.x, c.y) &&
+      !(c.x === playerPos.x && c.y === playerPos.y)
   );
   if (!next) return false;
   if (next.x !== enemy.x) enemy.facing = next.x < enemy.x ? -1 : 1;
@@ -806,6 +946,7 @@ function isLineBlockedByWall(area, enemy, playerPos) {
 function canUsePenguinRanged(enemy, area, playerPos) {
   const type = getEnemyType(enemy);
   if (type.id !== "penguin") return false;
+  if (roomIndexAt(area, enemy.x, enemy.y) < 0) return false;
   if (!isStraightLineWithin(enemy, playerPos, type.range)) return false;
   return !isLineBlockedByWall(area, enemy, playerPos);
 }
@@ -880,7 +1021,6 @@ function endPlayerTurn(actionType = "") {
     applyEnemyPressure();
     updateFov();
   }
-  updateDangerPreview();
   updateHint();
 }
 
@@ -925,34 +1065,6 @@ function consumeOxygen() {
   }
 }
 
-function updateDangerPreview() {
-  if (gameState.phase !== "playing") {
-    gameState.dangerPreview = "-";
-    return;
-  }
-  const area = currentArea();
-  const p = area.playerPos;
-  const near = area.enemies.filter((e) => {
-    if (e.hp <= 0) return false;
-    const type = getEnemyType(e);
-    if (distance(e, p) === 1) return true;
-    if (type.id === "penguin" && canUsePenguinRanged(e, area, p)) return true;
-    return distance(e, p) <= CONFIG.dangerRadius;
-  }).length;
-  gameState.dangerPreview = near ? `危険: ${near}体接近` : "安全";
-}
-
-function isTileThreatened(area, x, y) {
-  return area.enemies.some((e) => {
-    if (e.hp <= 0) return false;
-    const type = getEnemyType(e);
-    const d = Math.abs(e.x - x) + Math.abs(e.y - y);
-    if (d === 1) return true;
-    if (type.id === "penguin" && (e.x === x || e.y === y) && d <= type.range && !isLineBlockedByWall(area, e, { x, y })) return true;
-    return false;
-  });
-}
-
 function onReturnRun() {
   gameState.town.level += 1;
   gameState.town.upgradedVisual = true;
@@ -972,6 +1084,7 @@ function onReturnRun() {
 
 function descendDepth() {
   if (gameState.phase !== "playing") return;
+  resetLookMode();
   gameState.dungeon.depth += 1;
   gameState.dungeon.floor = makeDungeonFloor(gameState.dungeon.depth);
   gameState.dungeon.discovered = {};
@@ -980,7 +1093,6 @@ function descendDepth() {
   gameState.dungeon.visitedRooms = {};
   updateFov();
   addLog("渦に飲まれた。深く潜る");
-  updateDangerPreview();
   updateHint();
 }
 
@@ -1022,19 +1134,50 @@ function isDiscovered(x, y) {
 function updateFov() {
   if (gameState.phase !== "playing") return;
   const area = currentArea();
-  const p = area.playerPos;
+  const p = lookOrigin(area);
   const visible = {};
-  for (let y = p.y - CONFIG.fovRadius; y <= p.y + CONFIG.fovRadius; y++) {
-    for (let x = p.x - CONFIG.fovRadius; x <= p.x + CONFIG.fovRadius; x++) {
-      if (!inBounds(area, x, y)) continue;
-      const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
-      if (dist > CONFIG.fovRadius) continue;
-      const key = tileKey(x, y);
-      visible[key] = true;
-      gameState.dungeon.discovered[key] = true;
+  const inRoomIndex = roomIndexAt(area, p.x, p.y);
+  const lookActive = gameState.ui.lookMode && !!gameState.ui.lookCursor;
+  if (inRoomIndex >= 0) {
+    const room = area.rooms[inRoomIndex];
+    for (let y = room.y - 1; y <= room.y + room.h; y++) {
+      for (let x = room.x - 1; x <= room.x + room.w; x++) {
+        if (!inBounds(area, x, y)) continue;
+        if (lookActive) {
+          const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
+          if (dist > 4) continue;
+        }
+        const key = tileKey(x, y);
+        visible[key] = true;
+        gameState.dungeon.discovered[key] = true;
+      }
+    }
+  } else {
+    for (let y = p.y - 3; y <= p.y + 3; y++) {
+      for (let x = p.x - 3; x <= p.x + 3; x++) {
+        if (!inBounds(area, x, y)) continue;
+        const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
+        const isRoomTile = roomIndexAt(area, x, y) >= 0;
+        if (dist > 2 && !(isRoomTile && dist <= 3)) continue;
+        const key = tileKey(x, y);
+        visible[key] = true;
+        gameState.dungeon.discovered[key] = true;
+      }
     }
   }
   gameState.dungeon.visible = visible;
+}
+
+function isEnemyVisibleAt(area, x, y) {
+  if (gameState.phase !== "playing") return true;
+  if (!isVisible(x, y)) return false;
+  const p = lookOrigin(area);
+  const playerRoomIndex = roomIndexAt(area, p.x, p.y);
+  if (playerRoomIndex >= 0) {
+    const enemyRoomIndex = roomIndexAt(area, x, y);
+    if (enemyRoomIndex === playerRoomIndex) return true;
+  }
+  return distance(p, { x, y }) <= 1;
 }
 
 function findNearest(area, from, list) {
@@ -1056,6 +1199,58 @@ function autoTargetKey(action, area, p) {
 function roomIndexAt(area, x, y) {
   if (!area.rooms) return -1;
   return area.rooms.findIndex((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+}
+
+function resetLookMode() {
+  gameState.ui.lookMode = false;
+  gameState.ui.lookCursor = null;
+}
+
+function lookOrigin(area) {
+  if (gameState.phase !== "playing" || !gameState.ui.lookMode || !gameState.ui.lookCursor) return area.playerPos;
+  return gameState.ui.lookCursor;
+}
+
+function toggleLookMode() {
+  if (gameState.phase !== "playing") return;
+  const area = currentArea();
+  const p = area.playerPos;
+  const roomIndex = roomIndexAt(area, p.x, p.y);
+  if (roomIndex < 0) {
+    addLog("通路では見渡しできない。");
+    resetLookMode();
+    updateFov();
+    render();
+    return;
+  }
+  if (gameState.ui.lookMode) {
+    resetLookMode();
+    addLog("見渡しを終了。");
+    updateFov();
+    render();
+    return;
+  }
+  gameState.ui.lookMode = true;
+  gameState.ui.lookCursor = { x: p.x, y: p.y };
+  addLog("見渡し開始。矢印で視点移動");
+  updateFov();
+  render();
+}
+
+function moveLookCursor(dx, dy) {
+  if (gameState.phase !== "playing" || !gameState.ui.lookMode || !gameState.ui.lookCursor) return false;
+  const area = currentArea();
+  const cursor = gameState.ui.lookCursor;
+  const nx = cursor.x + dx;
+  const ny = cursor.y + dy;
+  const currentRoom = roomIndexAt(area, cursor.x, cursor.y);
+  if (currentRoom < 0) return false;
+  if (roomIndexAt(area, nx, ny) !== currentRoom) return false;
+  cursor.x = nx;
+  cursor.y = ny;
+  updateFov();
+  render();
+  return true;
 }
 
 function onEnterRoom(area, x, y) {
@@ -1082,7 +1277,8 @@ function stepToward(area, from, target) {
   return candidates.find((c) => {
     const nx = from.x + c.dx;
     const ny = from.y + c.dy;
-    return tileAt(area, nx, ny) !== "wall" && !enemyAt(area, nx, ny);
+    const tile = tileAt(area, nx, ny);
+    return tile !== "wall" && playerCanTraverse(tile) && !enemyAt(area, nx, ny);
   }) || null;
 }
 
@@ -1090,7 +1286,10 @@ function getFallbackAutoMove(area, from, failedDir = null) {
   const dirs = Object.values(DIRS).filter((d) => !failedDir || d.x !== failedDir.x || d.y !== failedDir.y);
   const candidates = dirs
     .map((d) => ({ dir: d, x: from.x + d.x, y: from.y + d.y }))
-    .filter((c) => tileAt(area, c.x, c.y) !== "wall" && !enemyAt(area, c.x, c.y));
+    .filter((c) => {
+      const tile = tileAt(area, c.x, c.y);
+      return tile !== "wall" && playerCanTraverse(tile) && !enemyAt(area, c.x, c.y);
+    });
   candidates.sort((a, b) => {
     const aScore = (itemAt(area, a.x, a.y) ? 3 : 0) + (!isDiscovered(a.x, a.y) ? 2 : 0) + (objectAt(area, a.x, a.y) ? 1 : 0);
     const bScore = (itemAt(area, b.x, b.y) ? 3 : 0) + (!isDiscovered(b.x, b.y) ? 2 : 0) + (objectAt(area, b.x, b.y) ? 1 : 0);
@@ -1173,7 +1372,7 @@ function performAutoTurn() {
   gameState.auto.targetKey = key;
   if (action.type === "attack") performPlayerAttack(action.dir.x, action.dir.y);
   if (action.type === "special") useSpecial();
-  if (action.type === "item") useItemSlot(action.index);
+  if (action.type === "item") useInventoryItem(action.index, true);
   if (action.type === "move") {
     const moved = tryMovePlayer(action.dir.x, action.dir.y);
     if (!moved) {
@@ -1204,7 +1403,7 @@ function performAutoTurn() {
 }
 
 function update(action, payload = {}) {
-  if (gameState.phase === "playing" && gameState.auto.enabled && ["MOVE", "INTERACT", "SPECIAL", "WAIT", "ATTACK_MODE"].includes(action)) {
+  if (gameState.phase === "playing" && gameState.auto.enabled && ["MOVE", "INTERACT", "SPECIAL", "WAIT", "ATTACK"].includes(action)) {
     return render();
   }
 
@@ -1215,20 +1414,22 @@ function update(action, payload = {}) {
   }
 
   if (action === "MOVE" && (gameState.phase === "town" || gameState.phase === "playing")) {
-    if (gameState.phase === "playing" && gameState.ui.attackMode) {
-      gameState.ui.attackMode = false;
-      performPlayerAttack(payload.dx, payload.dy);
-    } else {
-      tryMovePlayer(payload.dx, payload.dy);
-    }
+    tryMovePlayer(payload.dx, payload.dy);
   }
   if (action === "INTERACT" && (gameState.phase === "town" || gameState.phase === "playing")) interactNearest();
-  if (action === "SPECIAL" && gameState.phase === "playing") useSpecial();
-  if (action === "WAIT" && gameState.phase === "playing") performWait();
-  if (action === "ATTACK_MODE" && gameState.phase === "playing") {
-    gameState.ui.attackMode = true;
-    addLog("攻撃方向を選んでください");
+  if (action === "SPECIAL" && gameState.phase === "playing") {
+    if (gameState.ui.lookMode) resetLookMode();
+    useSpecial();
   }
+  if (action === "WAIT" && gameState.phase === "playing") {
+    if (gameState.ui.lookMode) resetLookMode();
+    performWait();
+  }
+  if (action === "ATTACK" && gameState.phase === "playing") {
+    if (gameState.ui.lookMode) resetLookMode();
+    performForwardAttack();
+  }
+  if (action === "TOGGLE_LOOK" && gameState.phase === "playing") toggleLookMode();
 
   if (action === "RESTART") {
     gameState.mission.retrieved = false;
@@ -1285,8 +1486,8 @@ function tileVisual(area, x, y) {
   const p = area.playerPos;
   if (p.x === x && p.y === y) return { type: "player", symbol: "🦭", facing: gameState.player.facing };
 
-  const e = enemyAt(area, x, y);
-  if (e) return { type: "enemy", symbol: getEnemyType(e).emoji, facing: e.facing || 1 };
+  const e = isEnemyVisibleAt(area, x, y) ? enemyAt(area, x, y) : null;
+  if (e) return { type: "enemy", symbol: getEnemyType(e).emoji, facing: e.facing || -1 };
 
   const it = itemAt(area, x, y);
   if (it) {
@@ -1312,10 +1513,11 @@ function tileVisual(area, x, y) {
   }
 
   const tile = tileAt(area, x, y);
-  if (tile === "wall") return { type: "wall", symbol: "■", facing: 1 };
-  if (tile === "poison") return { type: "floor", symbol: "☣️", facing: 1 };
-  if (tile === "water") return { type: "floor", symbol: "≈", facing: 1 };
-  return { type: "floor", symbol: "·", facing: 1 };
+  if (tile === "wall") return { type: "wall", symbol: "", facing: "right" };
+  if (tile === "poison") return { type: "floor", symbol: "☣️", facing: "right" };
+  if (tile === "hole") return { type: "floor", symbol: "🕳️", facing: "right" };
+  if (tile === "water") return { type: "floor", symbol: "💧", facing: "right" };
+  return { type: "floor", symbol: "", facing: "right" };
 }
 
 function renderLeftPanel(area, cam, hint) {
@@ -1339,22 +1541,22 @@ function renderRightPanel() {
   const slotsHtml = gameState.player.inventory
     .map(
       (slot, idx) =>
-        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う">${slot ? slot.emoji : "・"}</button>`
+        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う"><span class="item-equip">${slot && isEquipped(slot.type) ? "E" : ""}</span><span class="item-icon">${slot ? slot.emoji : "・"}</span><span class="item-name">${slot ? slot.name : "空き"}</span></button>`
     )
     .join("");
-  return `<aside class="side-panel right-panel"><div class="slot-grid">${slotsHtml}</div></aside>`;
+  return `<aside class="side-panel right-panel"><div class="slot-list">${slotsHtml}</div></aside>`;
 }
 
 function renderBoard(area, cam) {
   gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
-  const focusEnemy = findNearest(area, area.playerPos, area.enemies.filter((e) => e.hp > 0));
+  const focusEnemy = findNearest(area, area.playerPos, area.enemies.filter((e) => e.hp > 0 && isEnemyVisibleAt(area, e.x, e.y)));
   let html = `<div class="board-pane"><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
 
   for (let y = cam.y0; y < cam.y0 + cam.h; y++) {
     for (let x = cam.x0; x < cam.x0 + cam.w; x++) {
       const vis = tileVisual(area, x, y);
       const sprite = spriteForTile(vis.type, vis.symbol);
-      const flipClass = vis.facing === -1 ? "flip-x" : "";
+      const flipClass = vis.facing === "left" || vis.facing === -1 ? "flip-x" : "";
       let tip = "";
       if (vis.type === "enemy") {
         const enemy = enemyAt(area, x, y);
@@ -1366,20 +1568,13 @@ function renderBoard(area, cam) {
       const playerTileClass = vis.type === "player" ? " player-tile" : "";
       const visibilityClass = isVisible(x, y) ? " tile-visible" : " tile-memory";
       const hiddenClass = vis.type === "hidden" ? " tile-hidden" : "";
-      const enemyHere = enemyAt(area, x, y);
+      const enemyHere = isEnemyVisibleAt(area, x, y) ? enemyAt(area, x, y) : null;
       const objHere = objectAt(area, x, y);
       const itemHere = itemAt(area, x, y);
-      const threatClass = isTileThreatened(area, x, y) ? " tile-threat" : "";
       const focusClass = focusEnemy && focusEnemy.x === x && focusEnemy.y === y ? " tile-focus" : "";
       const interactClass = (objHere && distance(objHere, area.playerPos) <= 1) || (itemHere && distance(itemHere, area.playerPos) <= 1) ? " tile-interact" : "";
-      const attackPreviewClass =
-        gameState.ui.attackMode &&
-        x === area.playerPos.x + gameState.player.facing &&
-        y === area.playerPos.y &&
-        enemyHere
-          ? " tile-attack-preview"
-          : "";
-      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}${threatClass}${focusClass}${interactClass}${attackPreviewClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}><span class="${flipClass} sym-${vis.type}">${vis.symbol}</span></div>`;
+      const lookClass = gameState.ui.lookMode && gameState.ui.lookCursor?.x === x && gameState.ui.lookCursor?.y === y ? " tile-look-cursor" : "";
+      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}${focusClass}${interactClass}${lookClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}><span class="${flipClass} sym-${vis.type}">${vis.symbol}</span></div>`;
     }
   }
 
@@ -1414,16 +1609,16 @@ function renderMiniMap(area, cam) {
   for (let y = 0; y < area.height; y++) {
     for (let x = 0; x < area.width; x++) {
       const discovered = isDiscovered(x, y);
-      const kind = !discovered ? "unknown" : tileAt(area, x, y) === "wall" ? "wall" : "floor";
+      const t = tileAt(area, x, y);
+      const kind = !discovered ? "unknown" : t === "wall" ? "wall" : t === "water" ? "water" : t === "hole" ? "hole" : "floor";
       const current = x === area.playerPos.x && y === area.playerPos.y ? " player" : "";
-      const focus = x >= cam.x0 && x < cam.x0 + cam.w && y >= cam.y0 && y < cam.y0 + cam.h ? " cam" : "";
-      dots += `<span class="mini-dot ${kind}${current}${focus}"></span>`;
+      dots += `<span class="mini-dot ${kind}${current}"></span>`;
     }
   }
   return `<div class="minimap" style="grid-template-columns:repeat(${area.width},5px)">${dots}</div>`;
 }
 
-function renderArea(area, title, hint) {
+function renderArea(area, hint) {
   const cam = cameraFor(area);
   return `
     <div class="field-shell">
@@ -1438,16 +1633,28 @@ function renderArea(area, title, hint) {
 
 function renderHudBar() {
   const hpRatio = Math.max(0, Math.min(1, gameState.player.hp / gameState.player.maxHp));
+  const oxygenRatio = Math.max(0, Math.min(1, gameState.player.oxygen / gameState.player.maxOxygen));
   const hpState = hpRatio > 0.6 ? "safe" : hpRatio > 0.3 ? "mid" : "low";
+  const dungeonName = gameState.phase === "playing" ? "蛇頭山 低層" : "拠点";
+  const floorLabel = gameState.phase === "playing" ? `${gameState.dungeon.depth}F` : "-";
   hudEl.innerHTML = `
     <div class="hud-bar">
       ${gameState.auto.enabled ? '<span class="hud-auto-dot">AUTO</span>' : ""}
-      <div class="hp-wrap">
-        <div class="hp-bar"><div class="hp-fill ${hpState}" style="width:${Math.round(hpRatio * 100)}%"></div></div>
-        <span class="hud-hp">${gameState.player.hp}/${gameState.player.maxHp}</span>
+      <div class="hud-left">
+        <div class="hud-dungeon">${dungeonName}</div>
+        <div class="hud-floor">${floorLabel}</div>
       </div>
-      <span class="hud-oxy">O2 ${gameState.player.oxygen}</span>
-      <span class="hud-pp">PP ${gameState.player.pp}/${gameState.player.maxPp}</span>
+      <div class="hud-center">
+        <div class="hp-wrap">
+          <div class="hp-bar"><div class="hp-fill ${hpState}" style="width:${Math.round(hpRatio * 100)}%"></div></div>
+          <span class="hud-hp">${gameState.player.hp}/${gameState.player.maxHp}</span>
+        </div>
+        <div class="oxy-wrap">
+          <div class="oxy-bar"><div class="oxy-fill" style="width:${Math.round(oxygenRatio * 100)}%"></div></div>
+          <span class="hud-oxy">${gameState.player.oxygen}/${gameState.player.maxOxygen}</span>
+        </div>
+      </div>
+      <div class="hud-right">💰 ${gameState.player.totalFish}</div>
     </div>
   `;
 }
@@ -1469,9 +1676,10 @@ function renderActionBar() {
     <div class='controls-row compact'>
       <div class="control-group">
         <button data-action='INTERACT'>E</button>
-        <button data-action='ATTACK_MODE'>Z</button>
+        <button data-action='ATTACK'>Z</button>
         <button data-action='SPECIAL'>X</button>
         <button data-action='WAIT'>Space</button>
+        <button data-action='TOGGLE_LOOK'>C</button>
       </div>
       <div class="control-group auto-group">
         <button data-action='TOGGLE_AUTO'>Q</button>
@@ -1511,13 +1719,13 @@ function render() {
 
   if (gameState.phase === "town") {
     viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
-    viewEl.innerHTML = renderArea(gameState.town.map, "村", gameState.town.hint) + renderStatusPanel();
+    viewEl.innerHTML = renderArea(gameState.town.map, gameState.town.hint) + renderStatusPanel();
     controlsEl.innerHTML = renderActionBar();
   }
 
   if (gameState.phase === "playing") {
     viewEl.className = gameState.dungeon.unstable ? "floor-unstable" : "";
-    viewEl.innerHTML = renderArea(gameState.dungeon.floor, "海底", gameState.dungeon.hint) + renderStatusPanel();
+    viewEl.innerHTML = renderArea(gameState.dungeon.floor, gameState.dungeon.hint) + renderStatusPanel();
     controlsEl.innerHTML = renderActionBar();
   }
 
@@ -1539,7 +1747,7 @@ controlsEl.addEventListener("click", (e) => {
 document.addEventListener("click", (e) => {
   const slotBtn = e.target.closest("[data-slot-index]");
   if (!slotBtn) return;
-  useItemSlot(Number(slotBtn.dataset.slotIndex));
+  useInventoryItem(Number(slotBtn.dataset.slotIndex), true);
 });
 
 viewEl.addEventListener("mousemove", (e) => {
@@ -1554,8 +1762,7 @@ viewEl.addEventListener("mousemove", (e) => {
   }
   const x = Number(tile.dataset.mapX);
   const y = Number(tile.dataset.mapY);
-  gameState.ui.hoverTile = { x, y };
-  const enemy = enemyAt(gameState.dungeon.floor, x, y);
+  const enemy = isEnemyVisibleAt(gameState.dungeon.floor, x, y) ? enemyAt(gameState.dungeon.floor, x, y) : null;
   if (!enemy) {
     if (gameState.ui.hoverEnemy) {
       gameState.ui.hoverEnemy = null;
@@ -1572,7 +1779,6 @@ viewEl.addEventListener("mousemove", (e) => {
 });
 
 viewEl.addEventListener("mouseleave", () => {
-  gameState.ui.hoverTile = null;
   if (!gameState.ui.hoverEnemy) return;
   gameState.ui.hoverEnemy = null;
   render();
@@ -1581,6 +1787,10 @@ viewEl.addEventListener("mouseleave", () => {
 window.addEventListener("keydown", (e) => {
   if (DIRS[e.key] && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
+    if (gameState.phase === "playing" && gameState.ui.lookMode) {
+      moveLookCursor(DIRS[e.key].x, DIRS[e.key].y);
+      return;
+    }
     update("MOVE", { dx: DIRS[e.key].x, dy: DIRS[e.key].y });
   }
   if ((e.key === "e" || e.key === "E") && (gameState.phase === "town" || gameState.phase === "playing")) {
@@ -1589,7 +1799,7 @@ window.addEventListener("keydown", (e) => {
   }
   if ((e.key === "z" || e.key === "Z") && gameState.phase === "playing") {
     e.preventDefault();
-    update("ATTACK_MODE");
+    update("ATTACK");
   }
   if ((e.key === "x" || e.key === "X") && gameState.phase === "playing") {
     e.preventDefault();
@@ -1618,6 +1828,10 @@ window.addEventListener("keydown", (e) => {
   if ((e.key === "p" || e.key === "P") && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
     update("TOGGLE_STATUS");
+  }
+  if ((e.key === "c" || e.key === "C") && gameState.phase === "playing") {
+    e.preventDefault();
+    update("TOGGLE_LOOK");
   }
 });
 
