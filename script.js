@@ -23,6 +23,10 @@ const CONFIG = {
 const ASSETS = {
   floor: "assets/floor.png",
   wall: "assets/wall.png",
+  floor_cave: "assets/floor_cave.png",
+  wall_cave: "assets/wall_cave.png",
+  floor_ice: "assets/floor_ice.png",
+  wall_ice: "assets/wall_ice.png",
   player: "assets/player.png",
   enemy: "assets/enemy.png",
   item: "assets/item.png",
@@ -41,11 +45,119 @@ const DIRS = {
   ArrowRight: { x: 1, y: 0 },
 };
 
+const DUNGEON_THEMES = {
+  cave: {
+    floor: "floor_cave",
+    wall: "wall_cave",
+  },
+  ice: {
+    floor: "floor_ice",
+    wall: "wall_ice",
+  },
+};
+
 const ENEMY_TYPES = {
   penguin: { id: "penguin", name: "ペンギン", emoji: "🐧", maxHp: 2, attack: 1, behavior: "ranged", range: 5, exp: 2, swimmer: true },
   cheetah: { id: "cheetah", name: "チーター", emoji: "🐆", maxHp: 3, attack: 1, behavior: "fast", speed: 2, exp: 4 },
   elephant: { id: "elephant", name: "ゾウ", emoji: "🦣", maxHp: 6, attack: 1, behavior: "slow", actEvery: 2, exp: 6 },
   hippo: { id: "hippo", name: "カバ", emoji: "🦛", maxHp: 4, attack: 2, behavior: "heavy", exp: 5, swimmer: true },
+};
+
+const OBJECT_TYPES = {
+  T: {
+    label: "トレーニング",
+    hint: "E: トレーニング",
+    symbol: "🏋️",
+    renderType: "train",
+    interact() {
+      gameState.player.maxHp += 1;
+      gameState.player.hp = gameState.player.maxHp;
+      addLog("トレーニングした。");
+    },
+  },
+  R: {
+    label: "休憩所",
+    hint: "E: 休む",
+    symbol: "🍖",
+    renderType: "rest",
+    interact() {
+      gameState.player.hp = gameState.player.maxHp;
+      gameState.player.pp = gameState.player.maxPp;
+      addLog("腹ごしらえして休んだ。");
+    },
+  },
+  B: {
+    label: "依頼板",
+    hint: "E: 依頼を見る",
+    symbol: "📜",
+    renderType: "board",
+    interact() {
+      gameState.mission.accepted = true;
+      addLog("依頼板で『魚獲り』を受注した。");
+    },
+  },
+  D: {
+    label: "ダンジョン入口",
+    hint: "E: ダンジョンへ",
+    symbol: "🕳️",
+    renderType: "gate",
+    interact() {
+      startRun();
+    },
+  },
+  S: {
+    label: "看板",
+    hint: "S: カンバンを読む",
+    symbol: "🪧",
+    renderType: "board",
+    interact() {
+      addLog("ペンギン村へようこそ！");
+    },
+  },
+  V: {
+    label: "渦",
+    hint: "渦: 深く潜る",
+    symbol: "🌀",
+    renderType: "gate",
+    interact() {
+      descendDepth();
+    },
+  },
+  X: {
+    label: "帰還ポイント",
+    hint: "E: 帰還する",
+    symbol: "🚪",
+    renderType: "gate",
+    interact() {
+      onReturnRun();
+    },
+  },
+  C: {
+    label: "宝箱",
+    hint: "E: 宝箱を開ける",
+    symbol: "🎁",
+    renderType: "item",
+    interact(_, obj) {
+      if (obj.opened) return;
+      obj.opened = true;
+      const rewardRoll = Math.random();
+      if (rewardRoll < 0.4) {
+        gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 3);
+        addLog("宝箱から回復薬。HPが3回復した。");
+      } else if (rewardRoll < 0.75) {
+        gameState.player.pp = Math.min(gameState.player.maxPp, gameState.player.pp + 1);
+        addLog("宝箱から集中薬。PPが1回復した。");
+      } else {
+        gameState.player.fishThisRun += 1;
+        gameState.mission.retrieved = true;
+        addLog("宝箱から魚を見つけた。");
+      }
+      endPlayerTurn("interact");
+    },
+    getSymbol(obj) {
+      return obj && obj.opened ? "🧰" : "🎁";
+    },
+  },
 };
 
 const gameState = {
@@ -174,6 +286,10 @@ function loadAssets() {
   const fallback = {
     floor: makePlaceholder("·", "#1d3f4b"),
     wall: makePlaceholder("■", "#0b1d28"),
+    floor_cave: makePlaceholder("·", "#1d3f4b"),
+    wall_cave: makePlaceholder("■", "#0b1d28"),
+    floor_ice: makePlaceholder("·", "#2f5268"),
+    wall_ice: makePlaceholder("■", "#173246"),
     player: makePlaceholder("@", "#355f2f"),
     enemy: makePlaceholder("M", "#6a2f2f"),
     item: makePlaceholder("🐟", "#6b5d1f"),
@@ -452,6 +568,7 @@ function startRun() {
   gameState.mission.retrieved = false;
   gameState.dungeon = {
     floor: makeDungeonFloor(1),
+    theme: "cave",
     hint: "",
     turn: 1,
     unstable: false,
@@ -535,6 +652,23 @@ function enemyBehaviorText(typeId) {
   return texts[typeId] || "";
 }
 
+function getObjectTypeDef(type) {
+  return OBJECT_TYPES[type] || null;
+}
+
+function currentDungeonThemeDef() {
+  const themeName = gameState.dungeon?.theme || "cave";
+  return DUNGEON_THEMES[themeName] || DUNGEON_THEMES.cave;
+}
+
+function tileAssetKey(type) {
+  if (gameState.phase === "playing" && (type === "floor" || type === "wall")) {
+    const theme = currentDungeonThemeDef();
+    return type === "floor" ? theme.floor : theme.wall;
+  }
+  return type;
+}
+
 function getNaturalRecoveryAmount(level) {
   if (level >= 20) return 3;
   if (level >= 10) return 2;
@@ -593,52 +727,8 @@ function toggleAutoMode(nextEnabled = null, reason = "") {
 
 function applyInteraction(obj) {
   if (!obj) return;
-
-  if (gameState.phase === "town") {
-    if (obj.type === "T") {
-      gameState.player.maxHp += 1;
-      gameState.player.hp = gameState.player.maxHp;
-      addLog("トレーニングした。");
-    }
-    if (obj.type === "R") {
-      gameState.player.hp = gameState.player.maxHp;
-      gameState.player.pp = gameState.player.maxPp;
-      addLog("腹ごしらえして休んだ。");
-    }
-    if (obj.type === "S") {
-      addLog("ペンギン村へようこそ！")
-    }
-    if (obj.type === "D") startRun();
-    if (obj.type === "B") {
-      gameState.mission.accepted = true;
-      addLog("依頼板で『魚獲り』を受注した。");
-    }
-  }
-
-  if (gameState.phase === "playing") {
-    if (obj.type === "X") {
-      onReturnRun();
-    }
-    if (obj.type === "V") {
-      descendDepth();
-    }
-    if (obj.type === "C" && !obj.opened) {
-      obj.opened = true;
-      const rewardRoll = Math.random();
-      if (rewardRoll < 0.4) {
-        gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 3);
-        addLog("宝箱から回復薬。HPが3回復した。");
-      } else if (rewardRoll < 0.75) {
-        gameState.player.pp = Math.min(gameState.player.maxPp, gameState.player.pp + 1);
-        addLog("宝箱から集中薬。PPが1回復した。");
-      } else {
-        gameState.player.fishThisRun += 1;
-        gameState.mission.retrieved = true;
-        addLog("宝箱から魚を見つけた。");
-      }
-      endPlayerTurn("interact");
-    }
-  }
+  const def = getObjectTypeDef(obj.type);
+  if (def && def.interact) def.interact(gameState, obj);
 }
 
 function interactNearest() {
@@ -1122,18 +1212,8 @@ function updateHint() {
   const p = area.playerPos;
   const nearbyObj = area.objects.find((o) => distance(o, p) <= 1);
 
-  const hintMap = {
-    T: "E: トレーニング",
-    R: "E: 休んで回復",
-    D: "E: ダンジョンへ向かう",
-    B: "E: 依頼板を見る",
-    V: "渦: 深く潜る",
-    X: "E: 帰還する",
-    C: "E: 宝箱を開ける",
-    S: "S: カンバンを読む"
-  };
-
-  const text = nearbyObj ? hintMap[nearbyObj.type] || "E: 調べる" : "";
+  const nearbyDef = nearbyObj ? getObjectTypeDef(nearbyObj.type) : null;
+  const text = nearbyObj ? nearbyDef?.hint || "" : "";
   if (gameState.phase === "town") gameState.town.hint = text;
   if (gameState.phase === "playing") gameState.dungeon.hint = text;
 }
@@ -1482,8 +1562,8 @@ function cameraFor(area) {
 
 function spriteForTile(type, symbol) {
   const map = {
-    floor: "floor",
-    wall: "wall",
+    floor: tileAssetKey("floor"),
+    wall: tileAssetKey("wall"),
     player: "player",
     enemy: "enemy",
     item: "item",
@@ -1517,19 +1597,11 @@ function tileVisual(area, x, y) {
 
   const obj = objectAt(area, x, y);
   if (obj) {
-    const map = { V: "gate", X: "gate", T: "train", R: "rest", D: "gate", B: "board" , S:"board"};
-    const symbols = {
-      X: "🚪",
-      V: "🌀",
-      T: "🏋️",
-      R: "🍖",
-      D: "🕳️",
-      B: "📜",
-      C: obj.opened ? "🧰" : "🎁",
-      S: "🪧",
-    };
-    if (obj.type === "C") return { type: "item", symbol: symbols[obj.type] };
-    return { type: map[obj.type], symbol: symbols[obj.type] };
+    const def = getObjectTypeDef(obj.type);
+    if (def) {
+      const symbol = typeof def.getSymbol === "function" ? def.getSymbol(obj) : def.symbol;
+      return { type: def.renderType, symbol };
+    }
   }
 
   const tile = tileAt(area, x, y);
