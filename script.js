@@ -221,7 +221,7 @@ const logEl = document.querySelector("#log");
 
 function addLog(msg) {
   gameState.ui.messages.unshift(msg);
-  gameState.ui.messages = gameState.ui.messages.slice(0, 2);
+  gameState.ui.messages = gameState.ui.messages.slice(0, CONFIG.logLimit);
 }
 
 function setGameOver(message) {
@@ -1582,6 +1582,27 @@ function spriteForTile(type, symbol) {
   return { src, symbol, hasImageAsset };
 }
 
+function shouldShowTileSymbol(vis, sprite) {
+  return !!vis.symbol && !sprite.hasImageAsset;
+}
+
+function getTileClassNames({ vis, x, y, focusEnemy, area, objHere, itemHere }) {
+  const classes = ["tile"];
+  if (vis.type === "player") classes.push("player-tile");
+  classes.push(isVisible(x, y) ? "tile-visible" : "tile-memory");
+  if (vis.type === "hidden") classes.push("tile-hidden");
+  if (focusEnemy && focusEnemy.x === x && focusEnemy.y === y) classes.push("tile-focus");
+  if ((objHere && distance(objHere, area.playerPos) <= 1) || (itemHere && distance(itemHere, area.playerPos) <= 1)) classes.push("tile-interact");
+  if (gameState.ui.lookMode && gameState.ui.lookCursor?.x === x && gameState.ui.lookCursor?.y === y) classes.push("tile-look-cursor");
+  return classes.join(" ");
+}
+
+function buildTileHtml({ className, x, y, sprite, tip, vis }) {
+  const flipClass = vis.facing === "left" || vis.facing === -1 ? "flip-x" : "";
+  const symbolHtml = shouldShowTileSymbol(vis, sprite) ? `<span class="${flipClass} sym-${vis.type}">${vis.symbol}</span>` : "";
+  return `<div class="${className}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}>${symbolHtml}</div>`;
+}
+
 function tileVisual(area, x, y) {
   const temporarilyVisibleInLook = gameState.phase === "playing" && gameState.ui.lookMode && isVisible(x, y);
   if (!isDiscovered(x, y) && !temporarilyVisibleInLook) return { type: "hidden", symbol: "" };
@@ -1651,7 +1672,6 @@ function renderBoard(area, cam) {
     for (let x = cam.x0; x < cam.x0 + cam.w; x++) {
       const vis = tileVisual(area, x, y);
       const sprite = spriteForTile(vis.type, vis.symbol);
-      const flipClass = vis.facing === "left" || vis.facing === -1 ? "flip-x" : "";
       let tip = "";
       if (vis.type === "enemy") {
         const enemy = enemyAt(area, x, y);
@@ -1660,17 +1680,10 @@ function renderBoard(area, cam) {
           tip = ` title="${t.name} HP ${enemy.hp} / ATK ${t.attack}"`;
         }
       }
-      const playerTileClass = vis.type === "player" ? " player-tile" : "";
-      const visibilityClass = isVisible(x, y) ? " tile-visible" : " tile-memory";
-      const hiddenClass = vis.type === "hidden" ? " tile-hidden" : "";
-      const enemyHere = isEnemyVisibleAt(area, x, y) ? enemyAt(area, x, y) : null;
       const objHere = objectAt(area, x, y);
       const itemHere = itemAt(area, x, y);
-      const focusClass = focusEnemy && focusEnemy.x === x && focusEnemy.y === y ? " tile-focus" : "";
-      const interactClass = (objHere && distance(objHere, area.playerPos) <= 1) || (itemHere && distance(itemHere, area.playerPos) <= 1) ? " tile-interact" : "";
-      const lookClass = gameState.ui.lookMode && gameState.ui.lookCursor?.x === x && gameState.ui.lookCursor?.y === y ? " tile-look-cursor" : "";
-      const symbolHtml = !sprite.hasImageAsset && vis.symbol ? `<span class="${flipClass} sym-${vis.type}">${vis.symbol}</span>` : "";
-      html += `<div class="tile${playerTileClass}${visibilityClass}${hiddenClass}${focusClass}${interactClass}${lookClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}>${symbolHtml}</div>`;
+      const className = getTileClassNames({ vis, x, y, focusEnemy, area, objHere, itemHere });
+      html += buildTileHtml({ className, x, y, sprite, tip, vis });
     }
   }
 
@@ -1756,15 +1769,15 @@ function renderHudBar() {
 }
 
 function renderMessageBox() {
-  const [latest = "...", prev = ""] = gameState.ui.messages;
+  const msgs = gameState.ui.messages.slice(0, CONFIG.logLimit);
+  const [latest = "..."] = msgs;
   if (gameState.phase === "gameover") {
     logEl.innerHTML = `<div class="message-fixed latest">${latest}</div>`;
     return;
   }
-  logEl.innerHTML = `
-    <div class="message-fixed latest">${latest}</div>
-    <div class="message-fixed older">${prev}</div>
-  `;
+  logEl.innerHTML = msgs
+    .map((msg, idx) => `<div class="message-fixed ${idx === 0 ? "latest" : "older"}">${msg || ""}</div>`)
+    .join("");
 }
 
 function renderActionBar() {
