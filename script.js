@@ -414,6 +414,7 @@ function makeTownMap() {
   area.objects.push({ type: "R", x: 16, y: 11 });
   area.objects.push({ type: "B", x: 18, y: 11 }); // quest board close to loop
   area.objects.push({ type: "D", x: 20, y: 11 }); // dungeon entrance close to loop
+  area.objects.push({ type: "S", x: 21, y: 11}); //
   return area;
 }
 
@@ -603,6 +604,9 @@ function applyInteraction(obj) {
       gameState.player.hp = gameState.player.maxHp;
       gameState.player.pp = gameState.player.maxPp;
       addLog("腹ごしらえして休んだ。");
+    }
+    if (obj.type === "S") {
+      addLog("ペンギン村へようこそ！")
     }
     if (obj.type === "D") startRun();
     if (obj.type === "B") {
@@ -1126,6 +1130,7 @@ function updateHint() {
     V: "渦: 深く潜る",
     X: "E: 帰還する",
     C: "E: 宝箱を開ける",
+    S: "S: カンバンを読む"
   };
 
   const text = nearbyObj ? hintMap[nearbyObj.type] || "E: 調べる" : "";
@@ -1512,7 +1517,7 @@ function tileVisual(area, x, y) {
 
   const obj = objectAt(area, x, y);
   if (obj) {
-    const map = { V: "gate", X: "gate", T: "train", R: "rest", D: "gate", B: "board" };
+    const map = { V: "gate", X: "gate", T: "train", R: "rest", D: "gate", B: "board" , S:"board"};
     const symbols = {
       X: "🚪",
       V: "🌀",
@@ -1521,6 +1526,7 @@ function tileVisual(area, x, y) {
       D: "🕳️",
       B: "📜",
       C: obj.opened ? "🧰" : "🎁",
+      S: "🪧",
     };
     if (obj.type === "C") return { type: "item", symbol: symbols[obj.type] };
     return { type: map[obj.type], symbol: symbols[obj.type] };
