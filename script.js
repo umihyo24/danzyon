@@ -31,6 +31,7 @@ const ASSETS = {
   enemy: "assets/enemy.png",
   item: "assets/item.png",
   heal: "assets/heal.png",
+  oxygen: "assets/oxygen.png",
   stairs: "assets/stairs.png",
   train: "assets/train.png",
   rest: "assets/rest.png",
@@ -358,6 +359,7 @@ function loadAssets() {
     enemy: makePlaceholder("M", "#6a2f2f"),
     item: makePlaceholder("🐟", "#6b5d1f"),
     heal: makePlaceholder("+", "#2f5f5f"),
+    oxygen: makePlaceholder("O2", "#2f4f6f"),
     stairs: makePlaceholder("X", "#244863"),
     train: makePlaceholder("T", "#355f2f"),
     rest: makePlaceholder("R", "#2f5f5f"),
@@ -577,7 +579,8 @@ function placeDungeonContent(area, rooms, roles, depth, template) {
 
   const contentCenters = centers.filter((_, i) => i !== roles.startIndex);
   const healSpots = contentCenters.slice(0, 2).map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
-  area.items.push(...healSpots);
+  const oxygenSpots = contentCenters.slice(2, 4).map((c, i) => ({ type: "OXY", x: c.x - 1 + i, y: c.y + 1 }));
+  area.items.push(...healSpots, ...oxygenSpots);
 
   const fishBases = contentCenters.slice(0, 4);
   fishBases.forEach((c, i) => {
@@ -615,6 +618,7 @@ function makeFixedDungeonFloor(dungeonId, depth = 1) {
   area.objects.push({ type: "V", x: centers[5].x, y: centers[5].y });
   area.objects.push({ type: "C", x: centers[2].x + 1, y: centers[2].y - 1, opened: false });
   area.items.push(...[centers[2], centers[3]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y })));
+  area.items.push(...[centers[1], centers[4]].map((c, i) => ({ type: "OXY", x: c.x - 1 + i, y: c.y + 1 })));
   area.items.push(...[centers[1], centers[4], centers[5], { x: 24, y: 18 }].map((c, i) => ({
     type: i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL",
     x: c.x + (i % 2),
@@ -1081,6 +1085,7 @@ function pickupIfAny(area) {
     }
     const itemDefs = {
       H: { emoji: "🌿", name: "薬草" },
+      OXY: { emoji: "🫧", name: "酸素ボンベ" },
       TENGU: { emoji: "💪", name: "テングのチカラ" },
       MIZU: { emoji: "💪", name: "みずぐものちから" },
     };
@@ -1151,6 +1156,9 @@ function useInventoryItem(index, consumeTurn = true) {
     gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 2);
     recoverOxygen(4, "呼吸が落ち着き、酸素が少し回復した。");
     addLog("薬草を使って回復した。");
+  }
+  if (item.type === "OXY") {
+    recoverOxygen(20, "酸素ボンベを使って酸素を回復した。");
   }
   gameState.player.inventory[index] = null;
   if (consumeTurn && gameState.phase === "playing") endPlayerTurn("item");
@@ -1776,6 +1784,10 @@ function decideAutoAction() {
     const idx = gameState.player.inventory.findIndex((s) => s && s.type === "H");
     if (idx >= 0) return { type: "item", index: idx };
   }
+  if (style !== "aggressive" && gameState.player.oxygen <= Math.floor(gameState.player.maxOxygen * 0.35)) {
+    const idx = gameState.player.inventory.findIndex((s) => s && s.type === "OXY");
+    if (idx >= 0) return { type: "item", index: idx };
+  }
 
   const dungeonId = gameState.dungeon?.id;
   const shouldExit = !!dungeonId && isDungeonClearConditionMet(dungeonId);
@@ -1926,6 +1938,7 @@ function spriteForTile(type, symbol) {
     enemy: "enemy",
     item: "item",
     heal: "heal",
+    oxygen: "oxygen",
     stairs: "stairs",
     train: "train",
     rest: "rest",
@@ -1984,6 +1997,7 @@ function tileVisual(area, x, y) {
   const it = itemAt(area, x, y);
   if (it) {
     if (it.type === "H") return { type: "heal", symbol: "🌿" };
+    if (it.type === "OXY") return { type: "oxygen", symbol: "🫧" };
     if (it.type === "F_SMALL") return { type: "item", symbol: "🐟" };
     if (it.type === "F_BIG") return { type: "item", symbol: "🐠" };
     if (it.type === "TENGU" || it.type === "MIZU") return { type: "item", symbol: "💪" };
