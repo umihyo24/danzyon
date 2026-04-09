@@ -985,6 +985,14 @@ function getNaturalRecoveryAmount(level) {
   return 1;
 }
 
+function recoverOxygen(amount, reason = "") {
+  if (gameState.phase !== "playing") return;
+  if (amount <= 0) return;
+  const before = gameState.player.oxygen;
+  gameState.player.oxygen = Math.min(gameState.player.maxOxygen, gameState.player.oxygen + amount);
+  if (reason && gameState.player.oxygen > before) addLog(reason);
+}
+
 function gainExp(amount) {
   if (amount <= 0) return;
   gameState.player.exp += amount;
@@ -1141,6 +1149,7 @@ function useInventoryItem(index, consumeTurn = true) {
 
   if (item.type === "H") {
     gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + 2);
+    recoverOxygen(4, "呼吸が落ち着き、酸素が少し回復した。");
     addLog("薬草を使って回復した。");
   }
   gameState.player.inventory[index] = null;
@@ -1432,6 +1441,7 @@ function applyNaturalRecovery(actionType) {
     heal = getNaturalRecoveryAmount(gameState.player.level);
   }
   if (heal > 0) gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + heal);
+  if (actionType === "wait") recoverOxygen(2, "深呼吸して酸素を回復した。");
 }
 
 function endPlayerTurn(actionType = "") {
@@ -1976,6 +1986,7 @@ function tileVisual(area, x, y) {
     if (it.type === "H") return { type: "heal", symbol: "🌿" };
     if (it.type === "F_SMALL") return { type: "item", symbol: "🐟" };
     if (it.type === "F_BIG") return { type: "item", symbol: "🐠" };
+    if (it.type === "TENGU" || it.type === "MIZU") return { type: "item", symbol: "💪" };
   }
 
   const obj = objectAt(area, x, y);
