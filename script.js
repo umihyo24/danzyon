@@ -56,8 +56,32 @@ const DUNGEON_THEMES = {
   },
 };
 
+const DUNGEON_DEFS = {
+  urayama: {
+    id: "urayama",
+    name: "裏山",
+    maxDepth: 5,
+    theme: "ice",
+    mission: "裏山の主を倒して商人を救出する",
+    events: {
+      bossFloor: 5,
+    },
+  },
+  forest: {
+    id: "forest",
+    name: "ちかくのもり",
+    maxDepth: 5,
+    theme: "cave",
+    mission: "倒れている訓練教官を救助する",
+    events: {
+      downedNpcFloor: 3,
+    },
+  },
+};
+
 const ENEMY_TYPES = {
   penguin: { id: "penguin", name: "ペンギン", emoji: "🐧", maxHp: 2, attack: 1, behavior: "ranged", range: 5, exp: 2, swimmer: true },
+  penguinBoss: { id: "penguinBoss", name: "裏山の主", emoji: "👑", maxHp: 10, attack: 2, behavior: "ranged", range: 6, exp: 12, swimmer: true },
   cheetah: { id: "cheetah", name: "チーター", emoji: "🐆", maxHp: 3, attack: 1, behavior: "fast", speed: 2, exp: 4 },
   elephant: { id: "elephant", name: "ゾウ", emoji: "🦣", maxHp: 6, attack: 1, behavior: "slow", actEvery: 2, exp: 6 },
   hippo: { id: "hippo", name: "カバ", emoji: "🦛", maxHp: 4, attack: 2, behavior: "heavy", exp: 5, swimmer: true },
@@ -70,6 +94,10 @@ const OBJECT_TYPES = {
     symbol: "🏋️",
     renderType: "train",
     interact() {
+      if (!gameState.meta.unlocked.trainingFacility) {
+        addLog("訓練所はまだ使えない。");
+        return;
+      }
       gameState.player.maxHp += 1;
       gameState.player.hp = gameState.player.maxHp;
       addLog("トレーニングした。");
@@ -93,7 +121,16 @@ const OBJECT_TYPES = {
     renderType: "board",
     interact() {
       gameState.mission.accepted = true;
-      addLog("依頼板で『魚獲り』を受注した。");
+      const urayamaDone = !!gameState.meta.clearedDungeons.urayama;
+      const forestDone = !!gameState.meta.clearedDungeons.forest;
+      if (!urayamaDone || !forestDone) {
+        const targets = [];
+        if (!urayamaDone) targets.push("裏山: 商人救出");
+        if (!forestDone) targets.push("もり: 教官救助");
+        addLog(`依頼板: ${targets.join(" / ")}`);
+      } else {
+        addLog("依頼板: 追加の探索依頼あり。");
+      }
     },
   },
   D: {
@@ -102,7 +139,7 @@ const OBJECT_TYPES = {
     symbol: "🕳️",
     renderType: "gate",
     interact() {
-      startRun();
+      openDungeonSelect();
     },
   },
   S: {
@@ -130,6 +167,19 @@ const OBJECT_TYPES = {
     renderType: "gate",
     interact() {
       onReturnRun();
+    },
+  },
+  N: {
+    label: "倒れている教官",
+    hint: "E: 薬草で手当て",
+    symbol: "🧑‍🏫",
+    renderType: "board",
+    interact(_, obj) {
+      if (!obj || obj.rescued) return;
+      onNpcRescued(obj);
+    },
+    getSymbol(obj) {
+      return obj && obj.rescued ? "🙂" : "🧑‍🏫";
     },
   },
   C: {
@@ -204,6 +254,18 @@ const gameState = {
     targetItemName: "魚",
     retrieved: false,
     accepted: false,
+  },
+  meta: {
+    unlocked: {
+      shopkeeper: false,
+      trainerNpc: false,
+      trainingFacility: false,
+    },
+    clearedDungeons: {},
+  },
+  selection: {
+    dungeonMenuOpen: false,
+    selectedDungeonId: null,
   },
   dungeon: null,
   auto: {
@@ -533,7 +595,7 @@ function placeDungeonContent(area, rooms, roles, depth, template) {
   }
 }
 
-function makeFixedDungeonFloor(depth = 1) {
+function makeFixedDungeonFloor(dungeonId, depth = 1) {
   const area = createArea(CONFIG.floor.w, CONFIG.floor.h);
   const rooms = [
     { x: 2, y: 2, w: 8, h: 6 },
@@ -576,10 +638,11 @@ function makeFixedDungeonFloor(depth = 1) {
   }
   area.rooms = rooms;
   decorateDungeonTiles(area, centers);
+  placeDungeonEvents(area, dungeonId, depth);
   return area;
 }
 
-function makeDungeonFloor(depth = 1) {
+function makeDungeonFloor(dungeonId, depth = 1) {
   const template = pickFloorTemplate(depth);
   const maxRetries = 8;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -593,9 +656,10 @@ function makeDungeonFloor(depth = 1) {
     placeDungeonContent(area, rooms, roles, depth, template);
     area.rooms = rooms;
     decorateDungeonTiles(area, centers);
+    placeDungeonEvents(area, dungeonId, depth);
     if (hasRouteToStairs(area)) return area;
   }
-  return makeFixedDungeonFloor(depth);
+  return makeFixedDungeonFloor(dungeonId, depth);
 }
 
 function hasRouteToStairs(area) {
@@ -670,6 +734,84 @@ function decorateDungeonTiles(area, centers) {
   });
 }
 
+function getDungeonDef(dungeonId) {
+  if (!dungeonId) return DUNGEON_DEFS.urayama;
+  return DUNGEON_DEFS[dungeonId] || DUNGEON_DEFS.urayama;
+}
+
+function openDungeonSelect() {
+  gameState.selection.dungeonMenuOpen = true;
+  if (!gameState.selection.selectedDungeonId) gameState.selection.selectedDungeonId = "urayama";
+  addLog("行き先のダンジョンを選択しよう。");
+}
+
+function closeDungeonSelect() {
+  gameState.selection.dungeonMenuOpen = false;
+}
+
+function hasInventoryItemType(type) {
+  return gameState.player.inventory.some((slot) => slot && slot.type === type);
+}
+
+function consumeInventoryItemType(type) {
+  const idx = gameState.player.inventory.findIndex((slot) => slot && slot.type === type);
+  if (idx < 0) return false;
+  gameState.player.inventory[idx] = null;
+  reorderInventoryByEquipment();
+  return true;
+}
+
+function onNpcRescued(obj) {
+  if (!obj || obj.rescued) return;
+  if (!hasInventoryItemType("H")) {
+    addLog("薬草が必要だ。");
+    return;
+  }
+  consumeInventoryItemType("H");
+  obj.rescued = true;
+  if (gameState.dungeon?.run) gameState.dungeon.run.trainerRescued = true;
+  gameState.meta.unlocked.trainerNpc = true;
+  gameState.meta.unlocked.trainingFacility = true;
+  addLog("教官を手当てした。訓練所が使えるようになった。");
+  endPlayerTurn("interact");
+}
+
+function onBossDefeated(enemy) {
+  if (!enemy || enemy.typeId !== "penguinBoss") return;
+  if (gameState.dungeon?.run) gameState.dungeon.run.bossDefeated = true;
+  gameState.meta.unlocked.shopkeeper = true;
+  addLog("裏山の主を倒した！商人が村に戻れるようになった。");
+}
+
+function isDungeonClearConditionMet(dungeonId) {
+  const run = gameState.dungeon?.run;
+  if (!run) return false;
+  if (dungeonId === "urayama") return !!run.bossDefeated;
+  if (dungeonId === "forest") return !!run.trainerRescued && !!run.forestExitReached;
+  return false;
+}
+
+function completeDungeonRun(dungeonId) {
+  if (!gameState.meta.clearedDungeons[dungeonId]) {
+    gameState.meta.clearedDungeons[dungeonId] = true;
+    addLog(`${getDungeonDef(dungeonId).name}を踏破した。`);
+  }
+}
+
+function placeDungeonEvents(area, dungeonId, depth) {
+  if (dungeonId === "urayama" && depth === getDungeonDef("urayama").events.bossFloor) {
+    const goal = area.objects.find((o) => o.type === "V");
+    const spawn = goal ? nearestFloorTile(area, goal.x - 1, goal.y) || goal : area.playerPos;
+    if (!enemyAt(area, spawn.x, spawn.y)) {
+      spawnEnemyOfType(area, spawn.x, spawn.y, "penguinBoss", ENEMY_TYPES.penguinBoss.maxHp + gameState.town.level);
+    }
+  }
+  if (dungeonId === "forest" && depth === getDungeonDef("forest").events.downedNpcFloor) {
+    const safe = nearestFloorTile(area, area.playerPos.x + 3, area.playerPos.y + 1) || area.playerPos;
+    if (!objectAt(area, safe.x, safe.y)) area.objects.push({ type: "N", id: "trainer", x: safe.x, y: safe.y, rescued: false });
+  }
+}
+
 function makeTownMap() {
   const area = createArea(CONFIG.town.w, CONFIG.town.h);
   for (let y = 1; y < area.height - 1; y++) {
@@ -680,7 +822,7 @@ function makeTownMap() {
   area.tiles[8][11] = "floor";
 
   area.playerPos = { x: 17, y: 11 };
-  area.objects.push({ type: "T", x: 3, y: 3 }); // training is distant
+  if (gameState.meta.unlocked.trainingFacility) area.objects.push({ type: "T", x: 3, y: 3 }); // training is distant
   area.objects.push({ type: "R", x: 16, y: 11 });
   area.objects.push({ type: "B", x: 18, y: 11 }); // quest board close to loop
   area.objects.push({ type: "D", x: 20, y: 11 }); // dungeon entrance close to loop
@@ -697,7 +839,7 @@ function startTown() {
   gameState.auto.lastPos = null;
   gameState.phase = "town";
   ensureInventorySize();
-  if (!gameState.town.map) gameState.town.map = makeTownMap();
+  gameState.town.map = makeTownMap();
   gameState.town.map.playerPos = { x: 17, y: 11 };
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
@@ -707,11 +849,17 @@ function startTown() {
   updateHint();
 }
 
-function startRun() {
+function startRun(dungeonId = "urayama") {
+  startDungeonRun(dungeonId);
+}
+
+function startDungeonRun(dungeonId = "urayama") {
   if (!gameState.mission.accepted) {
     addLog("依頼板で任務を受けよう。");
     return;
   }
+  const def = getDungeonDef(dungeonId);
+  closeDungeonSelect();
   gameState.phase = "playing";
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
@@ -721,12 +869,19 @@ function startRun() {
   gameState.player.reviveUsed = false;
   gameState.mission.retrieved = false;
   gameState.dungeon = {
-    floor: makeDungeonFloor(1),
-    theme: "cave",
+    id: def.id,
+    floor: makeDungeonFloor(def.id, 1),
+    theme: def.theme,
     hint: "",
     turn: 1,
     unstable: false,
     depth: 1,
+    maxDepth: def.maxDepth,
+    run: {
+      bossDefeated: false,
+      trainerRescued: false,
+      forestExitReached: false,
+    },
     discovered: {},
     visible: {},
     lastPressureTurn: 0,
@@ -738,7 +893,7 @@ function startRun() {
   resetLookMode();
   updateFov();
   updateHint();
-  addLog("潜水開始。魚を集めて帰還しよう。");
+  addLog(`${def.name}へ出発。${def.mission}`);
 }
 
 function currentArea() {
@@ -799,6 +954,7 @@ function enemyCanTraverse(type, tile) {
 function enemyBehaviorText(typeId) {
   const texts = {
     penguin: "低HP・直線氷弾",
+    penguinBoss: "高耐久・強力な氷弾",
     cheetah: "高速2歩移動",
     elephant: "遅いが硬い",
     hippo: "一撃が重い",
@@ -1047,7 +1203,7 @@ function tryMovePlayer(dx, dy) {
       descendDepth();
       return true;
     }
-    if (stepObj?.type === "X" && gameState.mission.retrieved) {
+    if (stepObj?.type === "X") {
       onReturnRun();
       return true;
     }
@@ -1084,6 +1240,7 @@ function performPlayerAttack(dx, dy) {
   if (enemy.hp <= 0) {
     addLog(`${enemyName}を倒した。`);
     gainExp(getEnemyType(enemy).exp || 0);
+    onBossDefeated(enemy);
   }
   endPlayerTurn("hit");
 }
@@ -1122,6 +1279,7 @@ function useSpecial() {
   if (target.hp <= 0) {
     addLog(`${enemyName}を倒した。`);
     gainExp(getEnemyType(target).exp || 0);
+    onBossDefeated(target);
   }
   endPlayerTurn("special");
 }
@@ -1335,6 +1493,10 @@ function consumeOxygen() {
 }
 
 function onReturnRun() {
+  if (gameState.phase === "playing") {
+    const dungeonId = gameState.dungeon?.id;
+    if (dungeonId && isDungeonClearConditionMet(dungeonId)) completeDungeonRun(dungeonId);
+  }
   gameState.town.level += 1;
   gameState.town.upgradedVisual = true;
   if (Math.random() < 0.5) gameState.player.maxHp += 1;
@@ -1353,9 +1515,27 @@ function onReturnRun() {
 
 function descendDepth() {
   if (gameState.phase !== "playing") return;
+  const dungeonId = gameState.dungeon?.id;
+  const def = getDungeonDef(dungeonId);
+  if (!dungeonId || !def) return;
+  if (gameState.dungeon.depth >= def.maxDepth) {
+    if (dungeonId === "forest" && gameState.dungeon.run?.trainerRescued) {
+      gameState.dungeon.run.forestExitReached = true;
+    }
+    if (dungeonId === "forest" && isDungeonClearConditionMet(dungeonId)) {
+      completeDungeonRun(dungeonId);
+      addLog(`${def.name}を踏破して帰還した。`);
+      onReturnRun();
+    } else if (dungeonId === "forest") {
+      addLog("教官の救助が完了していない。");
+    } else {
+      addLog("これ以上は潜れない。帰還ポイントから戻ろう。");
+    }
+    return;
+  }
   resetLookMode();
   gameState.dungeon.depth += 1;
-  gameState.dungeon.floor = makeDungeonFloor(gameState.dungeon.depth);
+  gameState.dungeon.floor = makeDungeonFloor(dungeonId, gameState.dungeon.depth);
   gameState.dungeon.discovered = {};
   gameState.dungeon.visible = {};
   gameState.dungeon.lastPressureTurn = gameState.dungeon.turn;
@@ -1587,11 +1767,13 @@ function decideAutoAction() {
     if (idx >= 0) return { type: "item", index: idx };
   }
 
-  if (!gameState.mission.retrieved) {
+  const dungeonId = gameState.dungeon?.id;
+  const shouldExit = !!dungeonId && isDungeonClearConditionMet(dungeonId);
+  if (!shouldExit && !gameState.mission.retrieved) {
     const fishTarget = findNearest(area, p, area.items.filter((i) => i.type === "F_SMALL" || i.type === "F_BIG"));
     const step = stepToward(area, p, fishTarget);
     if (step) return { type: "move", dir: step };
-  } else {
+  } else if (shouldExit) {
     const returnTile = area.objects.find((o) => o.type === "X");
     const step = stepToward(area, p, returnTile);
     if (step) return { type: "move", dir: step };
@@ -1660,6 +1842,8 @@ function update(action, payload = {}) {
 
   if (action === "START_GAME") {
     gameState.town.map = makeTownMap();
+    gameState.selection.selectedDungeonId = "urayama";
+    closeDungeonSelect();
     startTown();
     addLog("村に着いた。依頼板で任務を受けよう。");
   }
@@ -1668,6 +1852,16 @@ function update(action, payload = {}) {
     tryMovePlayer(payload.dx, payload.dy);
   }
   if (action === "INTERACT" && (gameState.phase === "town" || gameState.phase === "playing")) interactNearest();
+  if (action === "SELECT_DUNGEON" && gameState.phase === "town") {
+    gameState.selection.selectedDungeonId = payload.dungeon && DUNGEON_DEFS[payload.dungeon] ? payload.dungeon : "urayama";
+    addLog(`${getDungeonDef(gameState.selection.selectedDungeonId).name}を選択した。`);
+  }
+  if (action === "START_SELECTED_DUNGEON" && gameState.phase === "town") {
+    startDungeonRun(gameState.selection.selectedDungeonId || "urayama");
+  }
+  if (action === "CLOSE_DUNGEON_MENU" && gameState.phase === "town") {
+    closeDungeonSelect();
+  }
   if (action === "SPECIAL" && gameState.phase === "playing") {
     if (gameState.input.lookMode) resetLookMode();
     useSpecial();
@@ -1684,6 +1878,7 @@ function update(action, payload = {}) {
 
   if (action === "RESTART") {
     gameState.mission.retrieved = false;
+    closeDungeonSelect();
     startTown();
     addLog("村へ戻った。準備して再挑戦しよう。");
   }
@@ -1908,7 +2103,7 @@ function renderHudBar() {
   const hpRatio = Math.max(0, Math.min(1, gameState.player.hp / gameState.player.maxHp));
   const oxygenRatio = Math.max(0, Math.min(1, gameState.player.oxygen / gameState.player.maxOxygen));
   const hpState = hpRatio > 0.6 ? "safe" : hpRatio > 0.3 ? "mid" : "low";
-  const dungeonName = gameState.phase === "playing" ? "蛇頭山 低層" : "拠点";
+  const dungeonName = gameState.phase === "playing" ? getDungeonDef(gameState.dungeon?.id).name : "拠点";
   const floorLabel = gameState.phase === "playing" ? `${gameState.dungeon.depth}F` : "-";
   hudEl.innerHTML = `
     <div class="hud-bar">
@@ -1946,7 +2141,16 @@ function renderMessageBox() {
 
 function renderActionBar() {
   if (gameState.phase === "town") {
-    return `<div class='controls-row compact'><div class="control-group"><button data-action='INTERACT'>E: 調べる</button></div><div class="control-group subtle"><button data-action='TOGGLE_STATUS'>P: STATUS</button></div></div>`;
+    const selected = gameState.selection.selectedDungeonId || "urayama";
+    const menu = gameState.selection.dungeonMenuOpen
+      ? `<div class="control-group">
+          <button data-action='SELECT_DUNGEON' data-dungeon='urayama' ${selected === "urayama" ? "disabled" : ""}>裏山</button>
+          <button data-action='SELECT_DUNGEON' data-dungeon='forest' ${selected === "forest" ? "disabled" : ""}>ちかくのもり</button>
+          <button data-action='START_SELECTED_DUNGEON'>出発</button>
+          <button data-action='CLOSE_DUNGEON_MENU'>閉じる</button>
+        </div>`
+      : "";
+    return `<div class='controls-row compact'><div class="control-group"><button data-action='INTERACT'>E: 調べる</button></div>${menu}<div class="control-group subtle"><button data-action='TOGGLE_STATUS'>P: STATUS</button></div></div>`;
   }
   if (gameState.phase !== "playing") return "";
   return `
@@ -1985,6 +2189,17 @@ function renderStatusPanel() {
   `;
 }
 
+function missionHintText() {
+  const cleared = gameState.meta.clearedDungeons;
+  if (!cleared.urayama || !cleared.forest) {
+    const list = [];
+    if (!cleared.urayama) list.push("裏山: 商人救出");
+    if (!cleared.forest) list.push("もり: 教官救助");
+    return `依頼: ${list.join(" / ")}`;
+  }
+  return "依頼: 追加探索で魚を集めよう";
+}
+
 function render() {
   renderHudBar();
 
@@ -1996,7 +2211,8 @@ function render() {
 
   if (gameState.phase === "town") {
     viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
-    viewEl.innerHTML = renderArea(gameState.town.map, gameState.town.hint) + renderStatusPanel();
+    const townHint = [missionHintText(), gameState.town.hint].filter(Boolean).join(" / ");
+    viewEl.innerHTML = renderArea(gameState.town.map, townHint) + renderStatusPanel();
     controlsEl.innerHTML = renderActionBar();
   }
 
@@ -2018,7 +2234,7 @@ function render() {
 controlsEl.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-action]");
   if (!btn) return;
-  update(btn.dataset.action, { style: btn.dataset.style });
+  update(btn.dataset.action, { style: btn.dataset.style, dungeon: btn.dataset.dungeon });
 });
 
 document.addEventListener("click", (e) => {
