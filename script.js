@@ -281,7 +281,6 @@ const gameState = {
 
 const hudEl = document.querySelector("#hud");
 const viewEl = document.querySelector("#view");
-const controlsEl = document.querySelector("#controls");
 const logEl = document.querySelector("#log");
 
 function addLog(msg) {
@@ -471,6 +470,36 @@ function spawnEnemyOfType(area, x, y, typeId, hpOverride = null) {
   }
 }
 
+function canPlaceItem(area, x, y) {
+  if (tileAt(area, x, y) !== "floor") return false;
+  if (itemAt(area, x, y)) return false;
+  if (objectAt(area, x, y)) return false;
+  if (enemyAt(area, x, y)) return false;
+  return true;
+}
+
+function nearestFreeFloorTile(area, startX, startY) {
+  const origin = nearestFloorTile(area, startX, startY);
+  if (!origin) return null;
+  if (canPlaceItem(area, origin.x, origin.y)) return origin;
+  for (let r = 1; r < 8; r++) {
+    for (let y = origin.y - r; y <= origin.y + r; y++) {
+      for (let x = origin.x - r; x <= origin.x + r; x++) {
+        if (!inBounds(area, x, y)) continue;
+        if (canPlaceItem(area, x, y)) return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+function addItemSafe(area, type, x, y) {
+  const pos = nearestFreeFloorTile(area, x, y);
+  if (!pos) return false;
+  area.items.push({ type, x: pos.x, y: pos.y });
+  return true;
+}
+
 function centerOfRoom(room) {
   return { x: Math.floor(room.x + room.w / 2), y: Math.floor(room.y + room.h / 2) };
 }
@@ -578,16 +607,15 @@ function placeDungeonContent(area, rooms, roles, depth, template) {
   }
 
   const contentCenters = centers.filter((_, i) => i !== roles.startIndex);
-  const healSpots = contentCenters.slice(0, 2).map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
-  const oxygenSpots = contentCenters.slice(2, 4).map((c, i) => ({ type: "OXY", x: c.x - 1 + i, y: c.y + 1 }));
-  area.items.push(...healSpots, ...oxygenSpots);
+  contentCenters.slice(0, 2).forEach((c, i) => addItemSafe(area, "H", c.x + (i - 1), c.y));
+  contentCenters.slice(2, 4).forEach((c, i) => addItemSafe(area, "OXY", c.x - 1 + i, c.y + 1));
 
   const fishBases = contentCenters.slice(0, 4);
   fishBases.forEach((c, i) => {
-    area.items.push({ type: i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", x: c.x + (i % 2), y: c.y });
+    addItemSafe(area, i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", c.x + (i % 2), c.y);
   });
-  if (contentCenters[2]) area.items.push({ type: "TENGU", x: contentCenters[2].x - 2, y: contentCenters[2].y + 1 });
-  if (contentCenters[1]) area.items.push({ type: "MIZU", x: contentCenters[1].x - 1, y: contentCenters[1].y + 2 });
+  if (contentCenters[2]) addItemSafe(area, "TENGU", contentCenters[2].x - 2, contentCenters[2].y + 1);
+  if (contentCenters[1]) addItemSafe(area, "MIZU", contentCenters[1].x - 1, contentCenters[1].y + 2);
 
   const enemyCycle = ["penguin", "cheetah", "elephant", "hippo", "penguin", "cheetah"];
   const enemySpawns = contentCenters.slice(0, 6).map((pos, i) => ({ pos, typeId: enemyCycle[i % enemyCycle.length] }));
@@ -617,15 +645,13 @@ function makeFixedDungeonFloor(dungeonId, depth = 1) {
   area.objects.push({ type: "X", x: centers[0].x + 1, y: centers[0].y + 1 });
   area.objects.push({ type: "V", x: centers[5].x, y: centers[5].y });
   area.objects.push({ type: "C", x: centers[2].x + 1, y: centers[2].y - 1, opened: false });
-  area.items.push(...[centers[2], centers[3]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y })));
-  area.items.push(...[centers[1], centers[4]].map((c, i) => ({ type: "OXY", x: c.x - 1 + i, y: c.y + 1 })));
-  area.items.push(...[centers[1], centers[4], centers[5], { x: 24, y: 18 }].map((c, i) => ({
-    type: i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL",
-    x: c.x + (i % 2),
-    y: c.y,
-  })));
-  area.items.push({ type: "TENGU", x: centers[3].x - 2, y: centers[3].y + 1 });
-  area.items.push({ type: "MIZU", x: centers[2].x - 1, y: centers[2].y + 2 });
+  [centers[2], centers[3]].forEach((c, i) => addItemSafe(area, "H", c.x + (i - 1), c.y));
+  [centers[1], centers[4]].forEach((c, i) => addItemSafe(area, "OXY", c.x - 1 + i, c.y + 1));
+  [centers[1], centers[4], centers[5], { x: 24, y: 18 }].forEach((c, i) => {
+    addItemSafe(area, i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", c.x + (i % 2), c.y);
+  });
+  addItemSafe(area, "TENGU", centers[3].x - 2, centers[3].y + 1);
+  addItemSafe(area, "MIZU", centers[2].x - 1, centers[2].y + 2);
 
   const enemySpawns = [
     { pos: centers[1], typeId: "penguin" },
@@ -2020,31 +2046,31 @@ function tileVisual(area, x, y) {
   return { type: "floor", symbol: "", facing: "right" };
 }
 
-function renderLeftPanel(area, cam, hint) {
+function renderInfoTray(area, cam, hint) {
   const hover = gameState.ui.hoverEnemy;
-  return `
-    <aside class="side-panel left-panel">
-      ${renderMiniMap(area, cam)}
-      <div class="hint-side">${hint || ""}</div>
-      <div class="enemy-info-fixed">
-        ${
-          hover
-            ? `<strong>${hover.name}</strong><br>HP ${hover.hp} / ATK ${hover.attack}<br>${hover.desc}`
-            : `<span class="meta">敵情報: カーソルを敵に合わせる</span>`
-        }
-      </div>
-    </aside>
-  `;
-}
-
-function renderRightPanel() {
   const slotsHtml = gameState.player.inventory
+    .slice(0, 12)
     .map(
       (slot, idx) =>
-        `<button data-slot-index="${idx}" class="item-slot-btn" title="アイテムを使う"><span class="item-equip">${slot && isEquipped(slot.type) ? "E" : ""}</span><span class="item-icon">${slot ? slot.emoji : "・"}</span><span class="item-name">${slot ? slot.name : "空き"}</span></button>`
+        `<button data-slot-index="${idx}" class="inventory-chip" title="アイテムを使う">${slot ? `${slot.emoji} ${slot.name}` : "・ 空き"}</button>`
     )
     .join("");
-  return `<aside class="side-panel right-panel"><div class="slot-list">${slotsHtml}</div></aside>`;
+  return `
+    <section class="info-tray">
+      ${renderMiniMap(area, cam)}
+      <div class="info-right">
+        <div class="hint-side">${hint || ""}</div>
+        <div class="enemy-info-fixed">
+          ${
+            hover
+              ? `<strong>${hover.name}</strong><br>HP ${hover.hp} / ATK ${hover.attack}<br>${hover.desc}`
+              : `<span class="meta">敵情報: カーソルを敵に合わせる</span>`
+          }
+        </div>
+        <div class="inventory-strip">${slotsHtml}</div>
+      </div>
+    </section>
+  `;
 }
 
 function renderBoard(area, cam) {
@@ -2116,9 +2142,8 @@ function renderArea(area, hint) {
   return `
     <div class="field-shell">
       <div class="battle-layout">
-        ${renderLeftPanel(area, cam, hint)}
         ${renderBoard(area, cam)}
-        ${renderRightPanel()}
+        ${renderInfoTray(area, cam, hint)}
       </div>
     </div>
   `;
@@ -2164,38 +2189,15 @@ function renderMessageBox() {
     .join("");
 }
 
-function renderActionBar() {
-  if (gameState.phase === "town") {
-    const selected = gameState.selection.selectedDungeonId || "urayama";
-    const menu = gameState.selection.dungeonMenuOpen
-      ? `<div class="control-group">
-          <button data-action='SELECT_DUNGEON' data-dungeon='urayama' ${selected === "urayama" ? "disabled" : ""}>裏山</button>
-          <button data-action='SELECT_DUNGEON' data-dungeon='forest' ${selected === "forest" ? "disabled" : ""}>ちかくのもり</button>
-          <button data-action='START_SELECTED_DUNGEON'>出発</button>
-          <button data-action='CLOSE_DUNGEON_MENU'>閉じる</button>
-        </div>`
-      : "";
-    return `<div class='controls-row compact'><div class="control-group"><button data-action='INTERACT'>E: 調べる</button></div>${menu}<div class="control-group subtle"><button data-action='TOGGLE_STATUS'>P: STATUS</button></div></div>`;
-  }
-  if (gameState.phase !== "playing") return "";
+function renderTownMenu() {
+  if (!gameState.selection.dungeonMenuOpen) return "";
+  const selected = gameState.selection.selectedDungeonId || "urayama";
   return `
-    <div class='controls-row compact'>
-      <div class="control-group">
-        <button data-action='INTERACT'>E</button>
-        <button data-action='ATTACK'>Z</button>
-        <button data-action='SPECIAL'>X</button>
-        <button data-action='WAIT'>Space</button>
-        <button data-action='TOGGLE_LOOK'>C</button>
-      </div>
-      <div class="control-group auto-group">
-        <button data-action='TOGGLE_AUTO'>Q</button>
-      </div>
-      <div class="control-group subtle">
-        <button data-action='AUTO_STYLE' data-style='aggressive'>1</button>
-        <button data-action='AUTO_STYLE' data-style='balanced'>2</button>
-        <button data-action='AUTO_STYLE' data-style='cautious'>3</button>
-        <button data-action='TOGGLE_STATUS'>P</button>
-      </div>
+    <div class="phase-actions">
+      <button data-action='SELECT_DUNGEON' data-dungeon='urayama' ${selected === "urayama" ? "disabled" : ""}>裏山</button>
+      <button data-action='SELECT_DUNGEON' data-dungeon='forest' ${selected === "forest" ? "disabled" : ""}>ちかくのもり</button>
+      <button data-action='START_SELECTED_DUNGEON'>出発</button>
+      <button data-action='CLOSE_DUNGEON_MENU'>閉じる</button>
     </div>
   `;
 }
@@ -2230,33 +2232,29 @@ function render() {
 
   if (gameState.phase === "start") {
     viewEl.className = "";
-    viewEl.innerHTML = `<div class="field-shell"><h2>開始</h2><p>村で準備を整え、海へ潜って魚を持ち帰ろう。</p></div>`;
-    controlsEl.innerHTML = `<div class='controls-row'><button data-action='START_GAME'>ゲーム開始</button></div>`;
+    viewEl.innerHTML = `<div class="field-shell"><h2>開始</h2><p>村で準備を整え、海へ潜って魚を持ち帰ろう。</p><div class="phase-actions"><button data-action='START_GAME'>ゲーム開始</button></div></div>`;
   }
 
   if (gameState.phase === "town") {
     viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
     const townHint = [missionHintText(), gameState.town.hint].filter(Boolean).join(" / ");
-    viewEl.innerHTML = renderArea(gameState.town.map, townHint) + renderStatusPanel();
-    controlsEl.innerHTML = renderActionBar();
+    viewEl.innerHTML = renderArea(gameState.town.map, townHint) + renderTownMenu() + renderStatusPanel();
   }
 
   if (gameState.phase === "playing") {
     viewEl.className = gameState.dungeon.unstable ? "floor-unstable" : "";
     viewEl.innerHTML = renderArea(gameState.dungeon.floor, gameState.dungeon.hint) + renderStatusPanel();
-    controlsEl.innerHTML = renderActionBar();
   }
 
   if (gameState.phase === "gameover") {
     viewEl.className = "";
-    viewEl.innerHTML = `<div class="field-shell"><h2>ゲームオーバー</h2><p>再挑戦しますか？</p></div>`;
-    controlsEl.innerHTML = `<div class='controls-row'><button data-action='RESTART'>町へ戻る</button></div>`;
+    viewEl.innerHTML = `<div class="field-shell"><h2>ゲームオーバー</h2><p>再挑戦しますか？</p><div class="phase-actions"><button data-action='RESTART'>町へ戻る</button></div></div>`;
   }
 
   renderMessageBox();
 }
 
-controlsEl.addEventListener("click", (e) => {
+document.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-action]");
   if (!btn) return;
   update(btn.dataset.action, { style: btn.dataset.style, dungeon: btn.dataset.dungeon });

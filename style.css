@@ -15,20 +15,31 @@ body {
   background: radial-gradient(circle at top, #1a4a61 0%, #0d2736 40%, var(--bg) 85%);
   color: var(--text);
   font-family: system-ui, sans-serif;
+  min-height: 100vh;
 }
 
 .app {
-  max-width: 1280px;
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 0.4rem;
+  min-height: 100vh;
+  padding: 0.5rem;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.35rem;
 }
 
-#hud, #view, #controls, #log {
+#hud, #view, #log {
   background: var(--panel);
   border: 1px solid #3d3657;
   border-radius: 8px;
   padding: 0.32rem 0.48rem;
-  margin-bottom: 0.28rem;
+}
+
+#view {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  min-height: 0;
 }
 
 #view.town-upgraded {
@@ -194,40 +205,28 @@ body {
 
 .field-shell {
   position: relative;
+  width: 100%;
 }
 
 .battle-layout {
-  display: grid;
-  grid-template-columns: 156px minmax(0, 1fr) 168px;
-  gap: 8px;
-  align-items: start;
-  justify-content: stretch;
-}
-
-.side-panel {
-  min-height: 120px;
-}
-
-.left-panel {
-  display: grid;
-  gap: 8px;
-}
-
-.right-panel {
-  display: grid;
-  gap: 6px;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
 }
 
 .board-pane {
   position: relative;
+  width: fit-content;
 }
 
 .hint-side {
-  font-size: 0.72rem;
+  font-size: 0.76rem;
   color: #9f97bb;
   opacity: 0.9;
-  min-height: 18px;
+  min-height: 0;
+  text-align: center;
 }
 
 .projectile-layer {
@@ -254,55 +253,6 @@ body {
     transform: translate(calc(var(--tx) * 57px + 12px), calc(var(--ty) * 57px + 10px));
     opacity: 0.2;
   }
-}
-
-.item-slot-panel {
-  display: none;
-}
-
-.slot-list {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
-}
-
-.item-slot-btn {
-  width: 100%;
-  min-height: 28px;
-  padding: 4px 8px;
-  border: 1px solid #8e84b4;
-  border-radius: 8px;
-  background: rgba(20, 17, 30, 0.9);
-  color: #fff;
-  font-size: 0.82rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  text-align: left;
-}
-
-.item-icon {
-  width: 1.2rem;
-  text-align: center;
-}
-
-.item-equip {
-  width: 0.9rem;
-  color: #9ef5b0;
-  font-weight: 800;
-  text-align: center;
-}
-
-.item-name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.enemy-info-panel {
-  display: none;
 }
 
 .damage-float {
@@ -452,35 +402,6 @@ body {
   color: #b7b0cc;
 }
 
-.controls-row {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 0.35rem;
-  align-items: center;
-}
-
-.controls-row.compact {
-  justify-content: space-between;
-}
-
-.control-group {
-  display: inline-flex;
-  gap: 0.35rem;
-  align-items: center;
-}
-
-.control-group.subtle button {
-  background: #2d2a42;
-  border-color: #665f86;
-}
-
-.auto-group button {
-  background: #274936;
-  border-color: #6abb96;
-  font-weight: 700;
-  min-width: 46px;
-}
-
 button {
   border: 1px solid #8274ae;
   border-radius: 8px;
@@ -530,22 +451,75 @@ button:hover { background: #4b3f68; }
 .mini-dot.player { background: #9effba; }
 
 .enemy-info-fixed {
-  min-height: 96px;
-  padding: 8px;
+  min-height: 74px;
+  padding: 6px;
   border: 1px solid rgba(123, 127, 181, 0.55);
   border-radius: 8px;
   background: rgba(8, 20, 30, 0.7);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   line-height: 1.35;
 }
 
+.info-tray {
+  width: min(100%, 720px);
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.info-right {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.inventory-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.3rem;
+}
+
+.inventory-chip {
+  border: 1px solid #726998;
+  border-radius: 7px;
+  background: rgba(20, 17, 30, 0.9);
+  min-height: 30px;
+  font-size: 0.76rem;
+  color: #fff;
+}
+
+.inventory-chip:hover {
+  background: #3f3558;
+}
+
+.phase-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: 0.45rem;
+}
+
 @media (max-width: 980px) {
-  .battle-layout {
-    grid-template-columns: 150px auto 170px;
-    gap: 6px;
-  }
   .mini-dot {
     width: 4px;
     height: 4px;
+  }
+}
+
+@media (max-width: 760px) {
+  .tile {
+    width: 44px;
+    height: 44px;
+  }
+  .grid {
+    gap: 2px;
+  }
+  .info-tray {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+  .inventory-strip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
