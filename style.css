@@ -118,6 +118,14 @@ body {
   --flip: -1;
 }
 
+.entity-flip-x {
+  transform: scaleX(-1);
+}
+
+.entity-flip-x .facing-indicator {
+  transform: scaleX(-1);
+}
+
 .player-tile .sym-player {
   transform: scale(1.22);
   text-shadow: 0 0 5px rgba(158, 245, 176, 0.45), 0 0 2px #000;
