@@ -407,7 +407,133 @@ function spawnEnemyOfType(area, x, y, typeId, hpOverride = null) {
   }
 }
 
-function makeDungeonFloor(depth = 1) {
+function centerOfRoom(room) {
+  return { x: Math.floor(room.x + room.w / 2), y: Math.floor(room.y + room.h / 2) };
+}
+
+function pickFloorTemplate(depth) {
+  if (depth === 20 || depth === 30) return "treasure";
+  const templates = ["standard", "compact", "treasure"];
+  return templates[Math.floor(Math.random() * templates.length)];
+}
+
+function getTemplateConfig(template) {
+  if (template === "compact") return { minRooms: 5, maxRooms: 7, minW: 5, maxW: 8, minH: 4, maxH: 7, spacing: 2 };
+  if (template === "treasure") return { minRooms: 6, maxRooms: 8, minW: 6, maxW: 10, minH: 5, maxH: 8, spacing: 2 };
+  return { minRooms: 5, maxRooms: 8, minW: 6, maxW: 10, minH: 5, maxH: 9, spacing: 2 };
+}
+
+function generateRoomsFromTemplate(template, areaWidth, areaHeight) {
+  const cfg = getTemplateConfig(template);
+  const target = cfg.minRooms + Math.floor(Math.random() * (cfg.maxRooms - cfg.minRooms + 1));
+  const rooms = [];
+  let tries = 0;
+  while (rooms.length < target && tries < 220) {
+    tries++;
+    const w = cfg.minW + Math.floor(Math.random() * (cfg.maxW - cfg.minW + 1));
+    const h = cfg.minH + Math.floor(Math.random() * (cfg.maxH - cfg.minH + 1));
+    const x = 1 + Math.floor(Math.random() * Math.max(1, areaWidth - w - 2));
+    const y = 1 + Math.floor(Math.random() * Math.max(1, areaHeight - h - 2));
+    const room = { x, y, w, h };
+    const overlap = rooms.some((r) => !(
+      room.x + room.w + cfg.spacing <= r.x ||
+      r.x + r.w + cfg.spacing <= room.x ||
+      room.y + room.h + cfg.spacing <= r.y ||
+      r.y + r.h + cfg.spacing <= room.y
+    ));
+    if (!overlap) rooms.push(room);
+  }
+  if (rooms.length < cfg.minRooms) return null;
+  rooms.sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  return rooms;
+}
+
+function buildRoomEdges(rooms) {
+  const edges = [];
+  for (let i = 0; i < rooms.length - 1; i++) edges.push([i, i + 1]);
+  const extraEdgeCount = 1 + Math.floor(Math.random() * 2);
+  const edgeExists = (a, b) => edges.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+  let attempts = 0;
+  while (edges.length < (rooms.length - 1) + extraEdgeCount && attempts < 30) {
+    attempts++;
+    const a = Math.floor(Math.random() * rooms.length);
+    const b = Math.floor(Math.random() * rooms.length);
+    if (a === b) continue;
+    if (Math.abs(a - b) <= 1) continue;
+    if (edgeExists(a, b)) continue;
+    edges.push([a, b]);
+  }
+  return edges;
+}
+
+function assignRoomRoles(rooms, template) {
+  const centers = rooms.map(centerOfRoom);
+  const leftMostX = Math.min(...centers.map((c) => c.x));
+  const startCandidates = centers.map((c, i) => ({ i, c })).filter(({ c }) => c.x <= leftMostX + 2);
+  const startIndex = startCandidates[Math.floor(Math.random() * startCandidates.length)].i;
+  let goalIndex = startIndex;
+  let farDist = -1;
+  for (let i = 0; i < centers.length; i++) {
+    if (i === startIndex) continue;
+    const d = Math.abs(centers[i].x - centers[startIndex].x) + Math.abs(centers[i].y - centers[startIndex].y);
+    if (d > farDist) {
+      farDist = d;
+      goalIndex = i;
+    }
+  }
+  let treasureIndex = null;
+  if (template === "treasure") {
+    for (let i = 0; i < centers.length; i++) {
+      if (i === startIndex || i === goalIndex) continue;
+      if (treasureIndex === null) {
+        treasureIndex = i;
+        continue;
+      }
+      const dNew = Math.abs(centers[i].x - centers[startIndex].x) + Math.abs(centers[i].y - centers[startIndex].y);
+      const dOld = Math.abs(centers[treasureIndex].x - centers[startIndex].x) + Math.abs(centers[treasureIndex].y - centers[startIndex].y);
+      if (dNew > dOld) treasureIndex = i;
+    }
+  }
+  return { startIndex, goalIndex, treasureIndex };
+}
+
+function placeDungeonContent(area, rooms, roles, depth, template) {
+  const centers = rooms.map(centerOfRoom);
+  const start = centers[roles.startIndex];
+  const goal = centers[roles.goalIndex];
+  area.playerPos = { x: start.x, y: start.y };
+  area.startPos = { x: start.x, y: start.y };
+
+  const returnPos = nearestFloorTile(area, start.x + 1, start.y + 1) || start;
+  area.objects.push({ type: "X", x: returnPos.x, y: returnPos.y });
+  area.objects.push({ type: "V", x: goal.x, y: goal.y });
+  if (template === "treasure" && roles.treasureIndex !== null) {
+    const t = centers[roles.treasureIndex];
+    const chestPos = nearestFloorTile(area, t.x + 1, t.y - 1) || t;
+    area.objects.push({ type: "C", x: chestPos.x, y: chestPos.y, opened: false });
+  }
+
+  const contentCenters = centers.filter((_, i) => i !== roles.startIndex);
+  const healSpots = contentCenters.slice(0, 2).map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
+  area.items.push(...healSpots);
+
+  const fishBases = contentCenters.slice(0, 4);
+  fishBases.forEach((c, i) => {
+    area.items.push({ type: i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", x: c.x + (i % 2), y: c.y });
+  });
+  if (contentCenters[2]) area.items.push({ type: "TENGU", x: contentCenters[2].x - 2, y: contentCenters[2].y + 1 });
+  if (contentCenters[1]) area.items.push({ type: "MIZU", x: contentCenters[1].x - 1, y: contentCenters[1].y + 2 });
+
+  const enemyCycle = ["penguin", "cheetah", "elephant", "hippo", "penguin", "cheetah"];
+  const enemySpawns = contentCenters.slice(0, 6).map((pos, i) => ({ pos, typeId: enemyCycle[i % enemyCycle.length] }));
+  enemySpawns.forEach((s) => spawnEnemyOfType(area, s.pos.x, s.pos.y, s.typeId, ENEMY_TYPES[s.typeId].maxHp + depth - 1));
+  for (let i = 0; i < gameState.town.level && enemySpawns.length; i++) {
+    const s = enemySpawns[i % enemySpawns.length];
+    spawnEnemyOfType(area, s.pos.x + (i % 2), s.pos.y + ((i + 1) % 2), s.typeId, ENEMY_TYPES[s.typeId].maxHp + depth - 1);
+  }
+}
+
+function makeFixedDungeonFloor(depth = 1) {
   const area = createArea(CONFIG.floor.w, CONFIG.floor.h);
   const rooms = [
     { x: 2, y: 2, w: 8, h: 6 },
@@ -417,27 +543,21 @@ function makeDungeonFloor(depth = 1) {
     { x: 19, y: 14, w: 8, h: 8 },
     { x: 30, y: 16, w: 8, h: 7 },
   ];
-
   rooms.forEach((r) => carveRoom(area, r));
-
-  const centers = rooms.map((r) => ({ x: Math.floor(r.x + r.w / 2), y: Math.floor(r.y + r.h / 2) }));
-  for (let i = 0; i < centers.length - 1; i++) carveCorridor(area, centers[i], centers[i + 1]);
-  carveCorridor(area, centers[1], centers[4]);
+  const centers = rooms.map(centerOfRoom);
+  buildRoomEdges(rooms).forEach(([a, b]) => carveCorridor(area, centers[a], centers[b]));
 
   area.playerPos = { x: centers[0].x, y: centers[0].y };
   area.startPos = { x: centers[0].x, y: centers[0].y };
-  area.objects.push({ type: "X", x: centers[0].x + 1, y: centers[0].y + 1 }); // return point
-  area.objects.push({ type: "V", x: centers[5].x, y: centers[5].y }); // vortex
-  area.objects.push({ type: "C", x: centers[2].x + 1, y: centers[2].y - 1, opened: false }); // chest
-
-  const healSpots = [centers[2], centers[3]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
-  area.items.push(...healSpots);
-  const fishSpots = [centers[1], centers[4], centers[5], { x: 24, y: 18 }].map((c, i) => ({
+  area.objects.push({ type: "X", x: centers[0].x + 1, y: centers[0].y + 1 });
+  area.objects.push({ type: "V", x: centers[5].x, y: centers[5].y });
+  area.objects.push({ type: "C", x: centers[2].x + 1, y: centers[2].y - 1, opened: false });
+  area.items.push(...[centers[2], centers[3]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y })));
+  area.items.push(...[centers[1], centers[4], centers[5], { x: 24, y: 18 }].map((c, i) => ({
     type: i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL",
     x: c.x + (i % 2),
     y: c.y,
-  }));
-  area.items.push(...fishSpots);
+  })));
   area.items.push({ type: "TENGU", x: centers[3].x - 2, y: centers[3].y + 1 });
   area.items.push({ type: "MIZU", x: centers[2].x - 1, y: centers[2].y + 2 });
 
@@ -449,17 +569,33 @@ function makeDungeonFloor(depth = 1) {
     { pos: centers[5], typeId: "penguin" },
     { pos: { x: 25, y: 10 }, typeId: "cheetah" },
   ];
-  enemySpawns.forEach((s) => spawnEnemyOfType(area, s.pos.x, s.pos.y, s.typeId, (ENEMY_TYPES[s.typeId].maxHp + depth - 1)));
-
+  enemySpawns.forEach((s) => spawnEnemyOfType(area, s.pos.x, s.pos.y, s.typeId, ENEMY_TYPES[s.typeId].maxHp + depth - 1));
   for (let i = 0; i < gameState.town.level; i++) {
     const s = enemySpawns[i % enemySpawns.length];
-    spawnEnemyOfType(area, s.pos.x + (i % 2), s.pos.y + ((i + 1) % 2), s.typeId, (ENEMY_TYPES[s.typeId].maxHp + depth - 1));
+    spawnEnemyOfType(area, s.pos.x + (i % 2), s.pos.y + ((i + 1) % 2), s.typeId, ENEMY_TYPES[s.typeId].maxHp + depth - 1);
   }
-
   area.rooms = rooms;
   decorateDungeonTiles(area, centers);
-
   return area;
+}
+
+function makeDungeonFloor(depth = 1) {
+  const template = pickFloorTemplate(depth);
+  const maxRetries = 8;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const area = createArea(CONFIG.floor.w, CONFIG.floor.h);
+    const rooms = generateRoomsFromTemplate(template, area.width, area.height);
+    if (!rooms || rooms.length < 5) continue;
+    rooms.forEach((r) => carveRoom(area, r));
+    const centers = rooms.map(centerOfRoom);
+    buildRoomEdges(rooms).forEach(([a, b]) => carveCorridor(area, centers[a], centers[b]));
+    const roles = assignRoomRoles(rooms, template);
+    placeDungeonContent(area, rooms, roles, depth, template);
+    area.rooms = rooms;
+    decorateDungeonTiles(area, centers);
+    if (hasRouteToStairs(area)) return area;
+  }
+  return makeFixedDungeonFloor(depth);
 }
 
 function hasRouteToStairs(area) {
