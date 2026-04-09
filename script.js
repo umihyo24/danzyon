@@ -470,6 +470,36 @@ function spawnEnemyOfType(area, x, y, typeId, hpOverride = null) {
   }
 }
 
+function canPlaceItem(area, x, y) {
+  if (tileAt(area, x, y) !== "floor") return false;
+  if (itemAt(area, x, y)) return false;
+  if (objectAt(area, x, y)) return false;
+  if (enemyAt(area, x, y)) return false;
+  return true;
+}
+
+function nearestFreeFloorTile(area, startX, startY) {
+  const origin = nearestFloorTile(area, startX, startY);
+  if (!origin) return null;
+  if (canPlaceItem(area, origin.x, origin.y)) return origin;
+  for (let r = 1; r < 8; r++) {
+    for (let y = origin.y - r; y <= origin.y + r; y++) {
+      for (let x = origin.x - r; x <= origin.x + r; x++) {
+        if (!inBounds(area, x, y)) continue;
+        if (canPlaceItem(area, x, y)) return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+function addItemSafe(area, type, x, y) {
+  const pos = nearestFreeFloorTile(area, x, y);
+  if (!pos) return false;
+  area.items.push({ type, x: pos.x, y: pos.y });
+  return true;
+}
+
 function centerOfRoom(room) {
   return { x: Math.floor(room.x + room.w / 2), y: Math.floor(room.y + room.h / 2) };
 }
@@ -577,16 +607,15 @@ function placeDungeonContent(area, rooms, roles, depth, template) {
   }
 
   const contentCenters = centers.filter((_, i) => i !== roles.startIndex);
-  const healSpots = contentCenters.slice(0, 2).map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y }));
-  const oxygenSpots = contentCenters.slice(2, 4).map((c, i) => ({ type: "OXY", x: c.x - 1 + i, y: c.y + 1 }));
-  area.items.push(...healSpots, ...oxygenSpots);
+  contentCenters.slice(0, 2).forEach((c, i) => addItemSafe(area, "H", c.x + (i - 1), c.y));
+  contentCenters.slice(2, 4).forEach((c, i) => addItemSafe(area, "OXY", c.x - 1 + i, c.y + 1));
 
   const fishBases = contentCenters.slice(0, 4);
   fishBases.forEach((c, i) => {
-    area.items.push({ type: i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", x: c.x + (i % 2), y: c.y });
+    addItemSafe(area, i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", c.x + (i % 2), c.y);
   });
-  if (contentCenters[2]) area.items.push({ type: "TENGU", x: contentCenters[2].x - 2, y: contentCenters[2].y + 1 });
-  if (contentCenters[1]) area.items.push({ type: "MIZU", x: contentCenters[1].x - 1, y: contentCenters[1].y + 2 });
+  if (contentCenters[2]) addItemSafe(area, "TENGU", contentCenters[2].x - 2, contentCenters[2].y + 1);
+  if (contentCenters[1]) addItemSafe(area, "MIZU", contentCenters[1].x - 1, contentCenters[1].y + 2);
 
   const enemyCycle = ["penguin", "cheetah", "elephant", "hippo", "penguin", "cheetah"];
   const enemySpawns = contentCenters.slice(0, 6).map((pos, i) => ({ pos, typeId: enemyCycle[i % enemyCycle.length] }));
@@ -616,15 +645,13 @@ function makeFixedDungeonFloor(dungeonId, depth = 1) {
   area.objects.push({ type: "X", x: centers[0].x + 1, y: centers[0].y + 1 });
   area.objects.push({ type: "V", x: centers[5].x, y: centers[5].y });
   area.objects.push({ type: "C", x: centers[2].x + 1, y: centers[2].y - 1, opened: false });
-  area.items.push(...[centers[2], centers[3]].map((c, i) => ({ type: "H", x: c.x + (i - 1), y: c.y })));
-  area.items.push(...[centers[1], centers[4]].map((c, i) => ({ type: "OXY", x: c.x - 1 + i, y: c.y + 1 })));
-  area.items.push(...[centers[1], centers[4], centers[5], { x: 24, y: 18 }].map((c, i) => ({
-    type: i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL",
-    x: c.x + (i % 2),
-    y: c.y,
-  })));
-  area.items.push({ type: "TENGU", x: centers[3].x - 2, y: centers[3].y + 1 });
-  area.items.push({ type: "MIZU", x: centers[2].x - 1, y: centers[2].y + 2 });
+  [centers[2], centers[3]].forEach((c, i) => addItemSafe(area, "H", c.x + (i - 1), c.y));
+  [centers[1], centers[4]].forEach((c, i) => addItemSafe(area, "OXY", c.x - 1 + i, c.y + 1));
+  [centers[1], centers[4], centers[5], { x: 24, y: 18 }].forEach((c, i) => {
+    addItemSafe(area, i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", c.x + (i % 2), c.y);
+  });
+  addItemSafe(area, "TENGU", centers[3].x - 2, centers[3].y + 1);
+  addItemSafe(area, "MIZU", centers[2].x - 1, centers[2].y + 2);
 
   const enemySpawns = [
     { pos: centers[1], typeId: "penguin" },
