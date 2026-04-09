@@ -1,5 +1,5 @@
 const CONFIG = {
-  tileSize: 54,
+  tileSize: 60,
   viewport: { w: 9, h: 9 },
   town: { w: 24, h: 16 },
   floor: { w: 40, h: 28 },
@@ -2046,30 +2046,51 @@ function tileVisual(area, x, y) {
   return { type: "floor", symbol: "", facing: "right" };
 }
 
-function renderInfoTray(area, cam, hint) {
+function renderEnemyCompact() {
   const hover = gameState.ui.hoverEnemy;
+  if (!hover) return `<div class="enemy-compact empty">敵: -</div>`;
+  return `<div class="enemy-compact"><strong>${hover.name}</strong><span>HP ${hover.hp} / ATK ${hover.attack}</span></div>`;
+}
+
+function renderInventoryCompact() {
   const slotsHtml = gameState.player.inventory
-    .slice(0, 12)
-    .map(
-      (slot, idx) =>
-        `<button data-slot-index="${idx}" class="inventory-chip" title="アイテムを使う">${slot ? `${slot.emoji} ${slot.name}` : "・ 空き"}</button>`
-    )
+    .map((slot, idx) => ({ slot, idx }))
+    .filter((entry) => entry.slot)
+    .slice(0, 6)
+    .map((entry) => `<button data-slot-index="${entry.idx}" class="inventory-chip compact" title="アイテムを使う">${entry.slot.emoji}</button>`)
     .join("");
+  const carryCount = gameState.player.inventory.filter(Boolean).length;
   return `
-    <section class="info-tray">
-      ${renderMiniMap(area, cam)}
-      <div class="info-right">
-        <div class="hint-side">${hint || ""}</div>
-        <div class="enemy-info-fixed">
-          ${
-            hover
-              ? `<strong>${hover.name}</strong><br>HP ${hover.hp} / ATK ${hover.attack}<br>${hover.desc}`
-              : `<span class="meta">敵情報: カーソルを敵に合わせる</span>`
-          }
-        </div>
-        <div class="inventory-strip">${slotsHtml}</div>
+    <div class="inventory-compact">
+      <span class="inventory-label">道具 ${carryCount}</span>
+      <div class="inventory-row">
+        ${slotsHtml || `<span class="meta">なし</span>`}
       </div>
-    </section>
+    </div>
+  `;
+}
+
+function renderBoardSupport(area, cam, hint) {
+  return `
+    <aside class="stage-corner-panel">
+      ${renderMiniMap(area, cam)}
+      ${renderEnemyCompact()}
+    </aside>
+    <div class="stage-bottom-panel">
+      <div class="hint-side">${hint || ""}</div>
+      ${renderInventoryCompact()}
+    </div>
+  `;
+}
+
+function renderBoardStage(area, cam, hint) {
+  return `
+    <div class="dungeon-stage">
+      <div class="stage-main">
+        ${renderBoard(area, cam)}
+      </div>
+      ${renderBoardSupport(area, cam, hint)}
+    </div>
   `;
 }
 
@@ -2141,10 +2162,7 @@ function renderArea(area, hint) {
   const cam = cameraFor(area);
   return `
     <div class="field-shell">
-      <div class="battle-layout">
-        ${renderBoard(area, cam)}
-        ${renderInfoTray(area, cam, hint)}
-      </div>
+      ${renderBoardStage(area, cam, hint)}
     </div>
   `;
 }
