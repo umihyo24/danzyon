@@ -621,20 +621,33 @@ function hasRouteToStairs(area) {
   return false;
 }
 
+function isRoomInteriorTile(area, x, y) {
+  const roomIdx = roomIndexAt(area, x, y);
+  if (roomIdx < 0 || !area.rooms || !area.rooms[roomIdx]) return false;
+  const room = area.rooms[roomIdx];
+  return x > room.x && x < room.x + room.w - 1 && y > room.y && y < room.y + room.h - 1;
+}
+
 function decorateDungeonTiles(area, centers) {
   const poisonSpots = [
     { x: centers[1].x - 1, y: centers[1].y + 1 },
     { x: centers[4].x + 1, y: centers[4].y - 1 },
   ];
   poisonSpots.forEach((p) => {
-    if (tileAt(area, p.x, p.y) === "floor" && !objectAt(area, p.x, p.y)) area.tiles[p.y][p.x] = "poison";
+    if (tileAt(area, p.x, p.y) !== "floor") return;
+    if (!isRoomInteriorTile(area, p.x, p.y)) return;
+    if (objectAt(area, p.x, p.y) || itemAt(area, p.x, p.y) || enemyAt(area, p.x, p.y)) return;
+    area.tiles[p.y][p.x] = "poison";
   });
   const waterSpots = [
     { x: centers[2].x, y: centers[2].y + 1 },
     { x: centers[3].x + 1, y: centers[3].y },
   ];
   waterSpots.forEach((p) => {
-    if (tileAt(area, p.x, p.y) === "floor" && !objectAt(area, p.x, p.y)) area.tiles[p.y][p.x] = "water";
+    if (tileAt(area, p.x, p.y) !== "floor") return;
+    if (!isRoomInteriorTile(area, p.x, p.y)) return;
+    if (objectAt(area, p.x, p.y) || itemAt(area, p.x, p.y) || enemyAt(area, p.x, p.y)) return;
+    area.tiles[p.y][p.x] = "water";
   });
 
   const terrainChains = [
@@ -647,7 +660,8 @@ function decorateDungeonTiles(area, centers) {
     chain.points.forEach((p) => {
       if (!inBounds(area, p.x, p.y)) return;
       if (tileAt(area, p.x, p.y) !== "floor") return;
-      if (objectAt(area, p.x, p.y)) return;
+      if (!isRoomInteriorTile(area, p.x, p.y)) return;
+      if (objectAt(area, p.x, p.y) || itemAt(area, p.x, p.y) || enemyAt(area, p.x, p.y)) return;
       const isStart = area.startPos && area.startPos.x === p.x && area.startPos.y === p.y;
       if (isStart) return;
       area.tiles[p.y][p.x] = chain.type;
@@ -1142,10 +1156,17 @@ function applyEnemyAttack(enemy, damage, text = null) {
 }
 
 function moveEnemyTowardPlayer(enemy, area, playerPos) {
-  const options = [
-    { x: enemy.x + Math.sign(playerPos.x - enemy.x), y: enemy.y },
-    { x: enemy.x, y: enemy.y + Math.sign(playerPos.y - enemy.y) },
-  ];
+  const dx = Math.sign(playerPos.x - enemy.x);
+  const dy = Math.sign(playerPos.y - enemy.y);
+  const options = [];
+  if (dx !== 0 && dy !== 0) options.push({ x: enemy.x + dx, y: enemy.y + dy });
+  if (Math.abs(playerPos.x - enemy.x) >= Math.abs(playerPos.y - enemy.y)) {
+    if (dx !== 0) options.push({ x: enemy.x + dx, y: enemy.y });
+    if (dy !== 0) options.push({ x: enemy.x, y: enemy.y + dy });
+  } else {
+    if (dy !== 0) options.push({ x: enemy.x, y: enemy.y + dy });
+    if (dx !== 0) options.push({ x: enemy.x + dx, y: enemy.y });
+  }
   const next = options.find(
     (c) =>
       tileAt(area, c.x, c.y) !== "wall" &&
@@ -1195,7 +1216,7 @@ function canUsePenguinRanged(enemy, area, playerPos) {
 }
 
 function canAttackNow(enemy, playerPos) {
-  return distance(enemy, playerPos) === 1;
+  return Math.max(Math.abs(enemy.x - playerPos.x), Math.abs(enemy.y - playerPos.y)) === 1;
 }
 
 function performStandardMeleeTurn(enemy, area, playerPos) {
@@ -1728,10 +1749,12 @@ function getTileClassNames({ vis, x, y, focusEnemy, area, objHere, itemHere }) {
 }
 
 function buildTileHtml({ className, x, y, sprite, tip, vis }) {
-  const flipClass = vis.facing === -1 || vis.facing?.x === -1 ? "flip-x" : "";
-  const symbolHtml = shouldShowTileSymbol(vis, sprite) ? `<span class="${flipClass} sym-${vis.type}">${vis.symbol}</span>` : "";
+  const facingRight = vis.facing === 1 || vis.facing?.x === 1;
+  const entityFlipClass = sprite.hasImageAsset && (vis.type === "player" || vis.type === "enemy") && facingRight ? "entity-flip-x" : "";
+  const symbolFlipClass = facingRight ? "flip-x" : "";
+  const symbolHtml = shouldShowTileSymbol(vis, sprite) ? `<span class="${symbolFlipClass} sym-${vis.type}">${vis.symbol}</span>` : "";
   const facingHtml = vis.type === "player" ? renderFacingIndicator() : "";
-  return `<div class="${className}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}>${symbolHtml}${facingHtml}</div>`;
+  return `<div class="${className} ${entityFlipClass}" data-map-x="${x}" data-map-y="${y}" style="background-image:url('${sprite.src}')"${tip}>${symbolHtml}${facingHtml}</div>`;
 }
 
 function renderFacingIndicator() {
