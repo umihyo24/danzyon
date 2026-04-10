@@ -292,14 +292,36 @@ const gameState = {
 
 const TEMP_ALLOW_DIRECT_DUNGEON_START = true;
 const DEBUG_UI = false;
+const DEBUG_FLOW = false;
 
 const hudEl = document.querySelector("#hud");
 const viewEl = document.querySelector("#view");
 const logEl = document.querySelector("#log");
 
+function hasRequiredUiRoots() {
+  if (!viewEl) {
+    console.error("[render] #view not found");
+    return false;
+  }
+  if (!hudEl) {
+    console.error("[render] #hud not found");
+    return false;
+  }
+  if (!logEl) {
+    console.error("[render] #log not found");
+    return false;
+  }
+  return true;
+}
+
 function debugUi(...args) {
   if (!DEBUG_UI) return;
   console.debug("[ui-debug]", ...args);
+}
+
+function debugFlow(...args) {
+  if (!DEBUG_FLOW) return;
+  console.debug("[flow-debug]", ...args);
 }
 
 function addLog(msg) {
@@ -2317,15 +2339,6 @@ document.addEventListener("click", (e) => {
   if (!btn) return;
   dispatch(btn.dataset.action, { style: btn.dataset.style, dungeon: btn.dataset.dungeon });
   return true;
-}
-
-viewEl?.addEventListener("click", (e) => {
-  const beforePhase = gameState.phase;
-  const handled = onActionClick(e, "view", viewEl);
-  if (handled) {
-    debugFlow("click handled in view; stop propagation", { beforePhase, afterPhase: gameState.phase });
-    e.stopPropagation();
-  }
 });
 
 document.addEventListener("click", (e) => {
@@ -2420,5 +2433,4 @@ window.addEventListener("keyup", (e) => {
 
 loadAssets();
 startEffectLoop();
-initIndependentHelloButton();
 render();
