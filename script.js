@@ -18,6 +18,9 @@ const CONFIG = {
   expBaseNext: 5,
   autoTurnMs: 260,
   pressureEveryTurns: 8,
+  projectileEffectMs: 420,
+  damageEffectMs: 550,
+  effectTickMs: 80,
 };
 
 const ASSETS = {
@@ -221,6 +224,7 @@ const gameState = {
     statusOpen: false,
     lookCursor: null,
     lastDeathReason: "",
+    effectTimerId: null,
   },
   input: {
     lookMode: false,
@@ -308,12 +312,8 @@ function addProjectileEffect(fromX, fromY, toX, toY, emoji = "🧊") {
     toX,
     toY,
     emoji,
-    expiresAt: Date.now() + 420,
+    expiresAt: Date.now() + CONFIG.projectileEffectMs,
   });
-  setTimeout(() => {
-    gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
-    render();
-  }, 430);
 }
 
 function addDamageEffect(x, y, text) {
@@ -323,12 +323,22 @@ function addDamageEffect(x, y, text) {
     x,
     y,
     text,
-    expiresAt: Date.now() + 550,
+    expiresAt: Date.now() + CONFIG.damageEffectMs,
   });
-  setTimeout(() => {
-    gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
-    render();
-  }, 560);
+}
+
+function updateEffects(now = Date.now()) {
+  const before = gameState.ui.effects.length;
+  if (!before) return false;
+  gameState.ui.effects = gameState.ui.effects.filter((e) => e && e.expiresAt > now);
+  return gameState.ui.effects.length !== before;
+}
+
+function startEffectLoop() {
+  if (gameState.ui.effectTimerId) return;
+  gameState.ui.effectTimerId = setInterval(() => {
+    update("TICK", { now: Date.now() });
+  }, CONFIG.effectTickMs);
 }
 
 function makePlaceholder(char, bg) {
@@ -1067,7 +1077,7 @@ function checkLevelUp() {
 function startAutoLoop() {
   stopAutoLoop();
   gameState.auto.timerId = setInterval(() => {
-    performAutoTurn();
+    update("AUTO_TURN");
   }, CONFIG.autoTurnMs);
 }
 
@@ -1179,8 +1189,7 @@ function useInventoryItem(index, consumeTurn = true) {
   const item = gameState.player.inventory[index];
   if (!item) {
     addLog("アイテムがない。");
-    render();
-    return;
+    return { success: false, consumedTurn: false };
   }
   if (isEquipItemType(item.type)) {
     if (isEquipped(item.type)) {
@@ -1189,15 +1198,13 @@ function useInventoryItem(index, consumeTurn = true) {
     } else {
       if (gameState.player.equipment.length >= 2) {
         addLog("装備は2つまで。");
-        render();
-        return;
+        return { success: false, consumedTurn: false };
       }
       gameState.player.equipment.push(item.type);
       addLog(`${item.name}を装備した。`);
     }
     reorderInventoryByEquipment();
-    render();
-    return;
+    return { success: true, consumedTurn: false };
   }
 
   if (item.type === "H") {
@@ -1209,9 +1216,10 @@ function useInventoryItem(index, consumeTurn = true) {
     recoverOxygen(20, "酸素ボンベを使って酸素を回復した。");
   }
   gameState.player.inventory[index] = null;
-  if (consumeTurn && gameState.phase === "playing") endPlayerTurn("item");
+  const consumedTurn = consumeTurn && gameState.phase === "playing";
+  if (consumedTurn) endPlayerTurn("item");
   reorderInventoryByEquipment();
-  render();
+  return { success: true, consumedTurn };
 }
 
 function reorderInventoryByEquipment() {
@@ -1728,7 +1736,6 @@ function toggleLookMode() {
     gameState.input.lookMode = true;
   }
   if (gameState.phase === "playing") updateFov();
-  render();
 }
 
 function setLookMode(active) {
@@ -1737,7 +1744,6 @@ function setLookMode(active) {
   if (gameState.input.lookMode === enabled) return;
   gameState.input.lookMode = enabled;
   updateFov();
-  render();
 }
 
 function moveLookCursor(dx, dy) {
@@ -1752,7 +1758,6 @@ function moveLookCursor(dx, dy) {
   cursor.x = nx;
   cursor.y = ny;
   updateFov();
-  render();
   return true;
 }
 
@@ -1896,7 +1901,7 @@ function performAutoTurn() {
   }
   if (action.type === "wait") performWait();
   const afterArea = currentArea();
-  if (!afterArea || gameState.phase !== "playing") return render();
+  if (!afterArea || gameState.phase !== "playing") return;
   const afterPos = afterArea.playerPos;
   const afterEnemyHp = afterArea.enemies.reduce((sum, e) => sum + Math.max(0, e.hp), 0);
   const progressed =
@@ -1908,68 +1913,100 @@ function performAutoTurn() {
     (!beforeRetrieved && gameState.mission.retrieved);
   handleAutoStuck(progressed);
   gameState.auto.lastPos = { x: afterPos.x, y: afterPos.y };
-  render();
 }
 
 function update(action, payload = {}) {
-  if (gameState.phase === "playing" && gameState.auto.enabled && ["MOVE", "INTERACT", "SPECIAL", "WAIT", "ATTACK"].includes(action)) {
+  if (gameState.phase === "playing" && gameState.auto.enabled && ["MOVE", "INTERACT", "SPECIAL", "WAIT", "ATTACK", "USE_ITEM"].includes(action)) {
+    updateEffects(payload.now);
     return render();
   }
 
-  if (action === "START_GAME") {
-    gameState.town.map = makeTownMap();
-    gameState.selection.selectedDungeonId = "urayama";
-    closeDungeonSelect();
-    startTown();
-    addLog("村に着いた。依頼板で任務を受けよう。");
+  switch (action) {
+    case "START_GAME":
+      gameState.town.map = makeTownMap();
+      gameState.selection.selectedDungeonId = "urayama";
+      closeDungeonSelect();
+      startTown();
+      addLog("村に着いた。依頼板で任務を受けよう。");
+      break;
+    case "MOVE":
+      if (gameState.phase === "town" || gameState.phase === "playing") tryMovePlayer(payload.dx, payload.dy);
+      break;
+    case "INTERACT":
+      if (gameState.phase === "town" || gameState.phase === "playing") interactNearest();
+      break;
+    case "SELECT_DUNGEON":
+      if (gameState.phase === "town") {
+        gameState.selection.selectedDungeonId = payload.dungeon && DUNGEON_DEFS[payload.dungeon] ? payload.dungeon : "urayama";
+        addLog(`${getDungeonDef(gameState.selection.selectedDungeonId).name}を選択した。`);
+      }
+      break;
+    case "START_SELECTED_DUNGEON":
+      if (gameState.phase === "town") startDungeonRun(gameState.selection.selectedDungeonId || "urayama");
+      break;
+    case "CLOSE_DUNGEON_MENU":
+      if (gameState.phase === "town") closeDungeonSelect();
+      break;
+    case "SPECIAL":
+      if (gameState.phase === "playing") {
+        if (gameState.input.lookMode) resetLookMode();
+        useSpecial();
+      }
+      break;
+    case "WAIT":
+      if (gameState.phase === "playing") {
+        if (gameState.input.lookMode) resetLookMode();
+        performWait();
+      }
+      break;
+    case "ATTACK":
+      if (gameState.phase === "playing") {
+        if (gameState.input.lookMode) resetLookMode();
+        performForwardAttack();
+      }
+      break;
+    case "TOGGLE_LOOK":
+      if (gameState.phase === "playing") toggleLookMode();
+      break;
+    case "SET_LOOK_MODE":
+      if (gameState.phase === "town" || gameState.phase === "playing") setLookMode(payload.active);
+      break;
+    case "LOOK_FACE":
+      if (gameState.input.lookMode && (gameState.phase === "town" || gameState.phase === "playing")) {
+        updateFacing(payload.dx, payload.dy);
+      }
+      break;
+    case "USE_ITEM":
+      useInventoryItem(Number(payload.index), payload.consumeTurn !== false);
+      break;
+    case "RESTART":
+      gameState.mission.retrieved = false;
+      closeDungeonSelect();
+      startTown();
+      addLog("村へ戻った。準備して再挑戦しよう。");
+      break;
+    case "TOGGLE_STATUS":
+      if (gameState.phase === "town" || gameState.phase === "playing") gameState.ui.statusOpen = !gameState.ui.statusOpen;
+      break;
+    case "TOGGLE_AUTO":
+      toggleAutoMode();
+      break;
+    case "AUTO_STYLE":
+      if (["aggressive", "balanced", "cautious"].includes(payload.style)) {
+        gameState.auto.style = payload.style;
+        addLog(`AUTO方針: ${payload.style}`);
+      }
+      break;
+    case "AUTO_TURN":
+      performAutoTurn();
+      break;
+    case "TICK":
+      break;
+    default:
+      break;
   }
 
-  if (action === "MOVE" && (gameState.phase === "town" || gameState.phase === "playing")) {
-    tryMovePlayer(payload.dx, payload.dy);
-  }
-  if (action === "INTERACT" && (gameState.phase === "town" || gameState.phase === "playing")) interactNearest();
-  if (action === "SELECT_DUNGEON" && gameState.phase === "town") {
-    gameState.selection.selectedDungeonId = payload.dungeon && DUNGEON_DEFS[payload.dungeon] ? payload.dungeon : "urayama";
-    addLog(`${getDungeonDef(gameState.selection.selectedDungeonId).name}を選択した。`);
-  }
-  if (action === "START_SELECTED_DUNGEON" && gameState.phase === "town") {
-    startDungeonRun(gameState.selection.selectedDungeonId || "urayama");
-  }
-  if (action === "CLOSE_DUNGEON_MENU" && gameState.phase === "town") {
-    closeDungeonSelect();
-  }
-  if (action === "SPECIAL" && gameState.phase === "playing") {
-    if (gameState.input.lookMode) resetLookMode();
-    useSpecial();
-  }
-  if (action === "WAIT" && gameState.phase === "playing") {
-    if (gameState.input.lookMode) resetLookMode();
-    performWait();
-  }
-  if (action === "ATTACK" && gameState.phase === "playing") {
-    if (gameState.input.lookMode) resetLookMode();
-    performForwardAttack();
-  }
-  if (action === "TOGGLE_LOOK" && gameState.phase === "playing") toggleLookMode();
-
-  if (action === "RESTART") {
-    gameState.mission.retrieved = false;
-    closeDungeonSelect();
-    startTown();
-    addLog("村へ戻った。準備して再挑戦しよう。");
-  }
-  if (action === "TOGGLE_STATUS" && (gameState.phase === "town" || gameState.phase === "playing")) {
-    gameState.ui.statusOpen = !gameState.ui.statusOpen;
-  }
-
-  if (action === "TOGGLE_AUTO") {
-    toggleAutoMode();
-  }
-  if (action === "AUTO_STYLE" && ["aggressive", "balanced", "cautious"].includes(payload.style)) {
-    gameState.auto.style = payload.style;
-    addLog(`AUTO方針: ${payload.style}`);
-  }
-
+  updateEffects(payload.now);
   render();
 }
 
@@ -2123,7 +2160,6 @@ function renderBoardStage(area, cam, hint) {
 }
 
 function renderBoard(area, cam) {
-  gameState.ui.effects = gameState.ui.effects.filter((e) => e.expiresAt > Date.now());
   const focusEnemy = findNearest(area, area.playerPos, area.enemies.filter((e) => e.hp > 0 && isEnemyVisibleAt(area, e.x, e.y)));
   let html = `<div class="board-pane"><div class="grid-wrap"><div class="grid" style="grid-template-columns: repeat(${cam.w}, ${CONFIG.tileSize}px)">`;
 
@@ -2309,7 +2345,7 @@ document.addEventListener("click", (e) => {
 document.addEventListener("click", (e) => {
   const slotBtn = e.target.closest("[data-slot-index]");
   if (!slotBtn) return;
-  useInventoryItem(Number(slotBtn.dataset.slotIndex), true);
+  update("USE_ITEM", { index: Number(slotBtn.dataset.slotIndex), consumeTurn: true });
 });
 
 viewEl.addEventListener("mousemove", (e) => {
@@ -2350,15 +2386,14 @@ window.addEventListener("keydown", (e) => {
   if (DIRS[e.key] && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
     if (gameState.input.lookMode) {
-      updateFacing(DIRS[e.key].x, DIRS[e.key].y);
-      render();
+      update("LOOK_FACE", { dx: DIRS[e.key].x, dy: DIRS[e.key].y });
       return;
     }
     update("MOVE", { dx: DIRS[e.key].x, dy: DIRS[e.key].y });
   }
   if (e.key === "Shift" && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
-    setLookMode(true);
+    update("SET_LOOK_MODE", { active: true });
   }
   if ((e.key === "e" || e.key === "E") && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
@@ -2405,9 +2440,10 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keyup", (e) => {
   if (e.key === "Shift" && (gameState.phase === "town" || gameState.phase === "playing")) {
     e.preventDefault();
-    setLookMode(false);
+    update("SET_LOOK_MODE", { active: false });
   }
 });
 
 loadAssets();
+startEffectLoop();
 render();
