@@ -221,12 +221,11 @@ body {
   height: 100%;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  grid-template-rows: auto auto;
+  grid-template-columns: minmax(0, max-content) clamp(260px, 24vw, 300px);
   align-content: center;
-  justify-items: center;
-  align-items: start;
-  gap: 0.5rem;
+  justify-content: center;
+  align-items: stretch;
+  gap: 0.6rem;
 }
 
 .stage-main {
@@ -471,12 +470,11 @@ button:hover { background: #4b3f68; }
 .mini-dot.player { background: #9effba; }
 
 .stage-corner-panel {
-  grid-column: 2;
-  grid-row: 1;
-  display: grid;
-  gap: 0.35rem;
-  justify-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
   width: 100%;
+  min-height: 100%;
   z-index: 2;
 }
 
@@ -496,20 +494,13 @@ button:hover { background: #4b3f68; }
   color: #b5c7d3;
 }
 
-.stage-bottom-panel {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  width: min(100%, 1090px);
-  display: block;
-  padding: 0.28rem 0.35rem;
-  border: 1px solid rgba(126, 145, 165, 0.28);
-  border-radius: 9px;
-  background: rgba(7, 17, 25, 0.75);
-}
-
 .inventory-box {
   display: grid;
   gap: 0.3rem;
+  padding: 0.3rem 0.35rem;
+  border: 1px solid rgba(126, 145, 165, 0.28);
+  border-radius: 9px;
+  background: rgba(7, 17, 25, 0.75);
 }
 
 .inventory-head {
@@ -601,7 +592,7 @@ button:hover { background: #4b3f68; }
     --tile-step: 57px;
   }
   .dungeon-stage {
-    grid-template-columns: minmax(0, 1fr) 250px;
+    grid-template-columns: minmax(0, max-content) 250px;
     align-content: start;
   }
   .inventory-list {
@@ -622,20 +613,14 @@ button:hover { background: #4b3f68; }
   }
   .dungeon-stage {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto;
     justify-items: stretch;
     align-content: start;
   }
   .stage-corner-panel {
-    grid-column: 1;
-    grid-row: 2;
     justify-items: stretch;
     width: 100%;
-  }
-  .stage-bottom-panel {
-    grid-column: 1;
-    grid-row: 3;
-    width: 100%;
+    min-height: 0;
   }
   .hint-side {
     max-width: 100%;

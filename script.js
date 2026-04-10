@@ -589,6 +589,7 @@ function assignRoomRoles(rooms, template) {
   }
   let treasureIndex = null;
   if (template === "treasure") {
+    const minTreasureDist = Math.max(8, Math.floor(CONFIG.viewport.w * 0.75));
     for (let i = 0; i < centers.length; i++) {
       if (i === startIndex || i === goalIndex) continue;
       if (treasureIndex === null) {
@@ -599,8 +600,53 @@ function assignRoomRoles(rooms, template) {
       const dOld = Math.abs(centers[treasureIndex].x - centers[startIndex].x) + Math.abs(centers[treasureIndex].y - centers[startIndex].y);
       if (dNew > dOld) treasureIndex = i;
     }
+    if (treasureIndex !== null) {
+      const treasureDist = Math.abs(centers[treasureIndex].x - centers[startIndex].x) + Math.abs(centers[treasureIndex].y - centers[startIndex].y);
+      if (treasureDist < minTreasureDist) {
+        const fallback = centers
+          .map((c, i) => ({ i, dist: Math.abs(c.x - centers[startIndex].x) + Math.abs(c.y - centers[startIndex].y) }))
+          .filter((entry) => entry.i !== startIndex && entry.i !== goalIndex && entry.dist >= minTreasureDist)
+          .sort((a, b) => b.dist - a.dist)[0];
+        if (fallback) treasureIndex = fallback.i;
+      }
+    }
   }
   return { startIndex, goalIndex, treasureIndex };
+}
+
+function spreadPlacement(base, idx) {
+  const offsets = [
+    { x: -1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: -1 },
+    { x: 2, y: 0 },
+    { x: -2, y: 1 },
+    { x: 1, y: -1 },
+  ];
+  const offset = offsets[idx % offsets.length];
+  return { x: base.x + offset.x, y: base.y + offset.y };
+}
+
+function ensureInterestingSlices(area, centers, depth) {
+  const sliceWidth = CONFIG.viewport.w;
+  const sliceCount = Math.max(1, Math.ceil(area.width / sliceWidth));
+  for (let s = 0; s < sliceCount; s++) {
+    const xMin = s * sliceWidth;
+    const xMax = Math.min(area.width - 1, xMin + sliceWidth - 1);
+    const hasEnemy = area.enemies.some((e) => e.x >= xMin && e.x <= xMax && e.hp > 0);
+    const hasItem = area.items.some((i) => i.x >= xMin && i.x <= xMax);
+    if (hasEnemy || hasItem) continue;
+    const center = centers
+      .filter((c) => c.x >= xMin && c.x <= xMax)
+      .sort((a, b) => Math.abs((xMin + xMax) / 2 - a.x) - Math.abs((xMin + xMax) / 2 - b.x))[0];
+    if (!center) continue;
+    const spot = nearestFreeFloorTile(area, center.x, center.y) || center;
+    if (s % 2 === 0) {
+      addItemSafe(area, depth > 2 ? "F_SMALL" : "H", spot.x, spot.y);
+    } else {
+      spawnEnemyOfType(area, spot.x, spot.y, "penguin", ENEMY_TYPES.penguin.maxHp + depth - 1);
+    }
+  }
 }
 
 function placeDungeonContent(area, rooms, roles, depth, template) {
@@ -610,33 +656,58 @@ function placeDungeonContent(area, rooms, roles, depth, template) {
   area.playerPos = { x: start.x, y: start.y };
   area.startPos = { x: start.x, y: start.y };
 
-  const returnPos = nearestFloorTile(area, start.x + 1, start.y + 1) || start;
+  const returnPos = nearestFloorTile(area, start.x + 2, start.y) || nearestFloorTile(area, start.x + 1, start.y + 1) || start;
   area.objects.push({ type: "X", x: returnPos.x, y: returnPos.y });
-  area.objects.push({ type: "V", x: goal.x, y: goal.y });
+  const stairsPos = nearestFloorTile(area, goal.x - 1, goal.y + (goal.y >= start.y ? 1 : -1)) || goal;
+  area.objects.push({ type: "V", x: stairsPos.x, y: stairsPos.y });
   if (template === "treasure" && roles.treasureIndex !== null) {
     const t = centers[roles.treasureIndex];
-    const chestPos = nearestFloorTile(area, t.x + 1, t.y - 1) || t;
+    const chestPos = nearestFloorTile(area, t.x + 2, t.y - 1) || nearestFloorTile(area, t.x + 1, t.y - 1) || t;
     area.objects.push({ type: "C", x: chestPos.x, y: chestPos.y, opened: false });
   }
 
   const contentCenters = centers.filter((_, i) => i !== roles.startIndex);
-  contentCenters.slice(0, 2).forEach((c, i) => addItemSafe(area, "H", c.x + (i - 1), c.y));
-  contentCenters.slice(2, 4).forEach((c, i) => addItemSafe(area, "OXY", c.x - 1 + i, c.y + 1));
+  const nearStartCenters = contentCenters
+    .slice()
+    .sort((a, b) => distance(a, start) - distance(b, start))
+    .slice(0, 2);
+  nearStartCenters.forEach((c, i) => {
+    const pos = spreadPlacement(c, i);
+    addItemSafe(area, i % 2 === 0 ? "H" : "OXY", pos.x, pos.y);
+  });
+
+  contentCenters.slice(0, 2).forEach((c, i) => {
+    const pos = spreadPlacement(c, i + 2);
+    addItemSafe(area, "H", pos.x, pos.y);
+  });
+  contentCenters.slice(2, 4).forEach((c, i) => {
+    const pos = spreadPlacement(c, i + 4);
+    addItemSafe(area, "OXY", pos.x, pos.y);
+  });
 
   const fishBases = contentCenters.slice(0, 4);
   fishBases.forEach((c, i) => {
-    addItemSafe(area, i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", c.x + (i % 2), c.y);
+    const pos = spreadPlacement(c, i + 1);
+    addItemSafe(area, i % 3 === 0 && depth > 1 ? "F_BIG" : "F_SMALL", pos.x, pos.y);
   });
   if (contentCenters[2]) addItemSafe(area, "TENGU", contentCenters[2].x - 2, contentCenters[2].y + 1);
   if (contentCenters[1]) addItemSafe(area, "MIZU", contentCenters[1].x - 1, contentCenters[1].y + 2);
 
   const enemyCycle = ["penguin", "cheetah", "elephant", "hippo", "penguin", "cheetah"];
-  const enemySpawns = contentCenters.slice(0, 6).map((pos, i) => ({ pos, typeId: enemyCycle[i % enemyCycle.length] }));
+  const enemySpawns = contentCenters.slice(0, 6).map((pos, i) => ({ pos: spreadPlacement(pos, i), typeId: enemyCycle[i % enemyCycle.length] }));
   enemySpawns.forEach((s) => spawnEnemyOfType(area, s.pos.x, s.pos.y, s.typeId, ENEMY_TYPES[s.typeId].maxHp + depth - 1));
   for (let i = 0; i < gameState.town.level && enemySpawns.length; i++) {
     const s = enemySpawns[i % enemySpawns.length];
     spawnEnemyOfType(area, s.pos.x + (i % 2), s.pos.y + ((i + 1) % 2), s.typeId, ENEMY_TYPES[s.typeId].maxHp + depth - 1);
   }
+
+  const pathMidX = Math.floor((returnPos.x + stairsPos.x) / 2);
+  const hasMidInterest = area.items.some((it) => Math.abs(it.x - pathMidX) <= 2) || area.enemies.some((e) => Math.abs(e.x - pathMidX) <= 2);
+  if (!hasMidInterest) {
+    const mid = nearestFreeFloorTile(area, pathMidX, start.y) || nearestFloorTile(area, pathMidX, start.y) || start;
+    addItemSafe(area, "F_SMALL", mid.x, mid.y);
+  }
+  ensureInterestingSlices(area, centers, depth);
 }
 
 function makeFixedDungeonFloor(dungeonId, depth = 1) {
@@ -1947,10 +2018,8 @@ function renderBoardSupport(area, cam, hint) {
       ${renderMiniMap(area, cam)}
       ${renderEnemyCompact()}
       <div class="hint-side">${hint || ""}</div>
-    </aside>
-    <div class="stage-bottom-panel">
       ${renderInventoryBox()}
-    </div>
+    </aside>
   `;
 }
 
