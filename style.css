@@ -394,15 +394,6 @@ body {
   font-weight: 700;
 }
 
-.hud-auto-dot {
-  font-size: 0.72rem;
-  color: #0e1f15;
-  background: #7cf1ac;
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-weight: 700;
-}
-
 #log {
   min-height: 28px;
   background: rgba(16, 41, 58, 0.78);
