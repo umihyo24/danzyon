@@ -1849,10 +1849,12 @@ function update(action, payload = {}) {
   }
   switch (action) {
     case "START_GAME":
+      debugFlow("START_GAME entered", { beforePhase: gameState.phase });
       gameState.town.map = makeTownMap();
       gameState.selection.selectedDungeonId = "urayama";
       closeDungeonSelect();
       startTown();
+      debugFlow("START_GAME completed", { afterPhase: gameState.phase });
       addLog("村に着いた。依頼板で任務を受けよう。");
       break;
     case "MOVE":
@@ -2170,6 +2172,10 @@ function renderArea(area, hint, overlays = "") {
 }
 
 function renderHudBar() {
+  if (!hudEl) {
+    console.error("[render] #hud not found");
+    return;
+  }
   const hpRatio = Math.max(0, Math.min(1, gameState.player.hp / gameState.player.maxHp));
   const oxygenRatio = Math.max(0, Math.min(1, gameState.player.oxygen / gameState.player.maxOxygen));
   const hpState = hpRatio > 0.6 ? "safe" : hpRatio > 0.3 ? "mid" : "low";
@@ -2197,6 +2203,10 @@ function renderHudBar() {
 }
 
 function renderMessageBox() {
+  if (!logEl) {
+    console.error("[render] #log not found");
+    return;
+  }
   const msgs = gameState.ui.messages.slice(0, CONFIG.logLimit);
   const [latest = "..."] = msgs;
   if (gameState.phase === "gameover") {
@@ -2249,6 +2259,8 @@ function missionHintText() {
 }
 
 function render() {
+  if (!hasRequiredUiRoots()) return;
+  debugFlow("render", { phase: gameState.phase });
   renderHudBar();
 
   if (gameState.phase === "start") {
@@ -2304,6 +2316,16 @@ document.addEventListener("click", (e) => {
   debugUi("action click resolved", { found: !!btn, action: btn?.dataset?.action || null });
   if (!btn) return;
   dispatch(btn.dataset.action, { style: btn.dataset.style, dungeon: btn.dataset.dungeon });
+  return true;
+}
+
+viewEl?.addEventListener("click", (e) => {
+  const beforePhase = gameState.phase;
+  const handled = onActionClick(e, "view", viewEl);
+  if (handled) {
+    debugFlow("click handled in view; stop propagation", { beforePhase, afterPhase: gameState.phase });
+    e.stopPropagation();
+  }
 });
 
 document.addEventListener("click", (e) => {
@@ -2312,39 +2334,43 @@ document.addEventListener("click", (e) => {
   dispatch("USE_ITEM", { index: Number(slotBtn.dataset.slotIndex), consumeTurn: true });
 });
 
-viewEl.addEventListener("mousemove", (e) => {
-  if (gameState.phase !== "playing") return;
-  const tile = e.target.closest(".tile[data-map-x][data-map-y]");
-  if (!tile) {
-    if (gameState.ui.hoverEnemy) {
-      gameState.ui.hoverEnemy = null;
+if (viewEl) {
+  viewEl.addEventListener("mousemove", (e) => {
+    if (gameState.phase !== "playing") return;
+    const tile = e.target.closest(".tile[data-map-x][data-map-y]");
+    if (!tile) {
+      if (gameState.ui.hoverEnemy) {
+        gameState.ui.hoverEnemy = null;
+        render();
+      }
+      return;
+    }
+    const x = Number(tile.dataset.mapX);
+    const y = Number(tile.dataset.mapY);
+    const enemy = isEnemyVisibleAt(gameState.dungeon.floor, x, y) ? enemyAt(gameState.dungeon.floor, x, y) : null;
+    if (!enemy) {
+      if (gameState.ui.hoverEnemy) {
+        gameState.ui.hoverEnemy = null;
+        render();
+      }
+      return;
+    }
+    const t = getEnemyType(enemy);
+    const nextInfo = { name: t.name, hp: enemy.hp, attack: t.attack, desc: enemyBehaviorText(t.id) };
+    if (JSON.stringify(gameState.ui.hoverEnemy) !== JSON.stringify(nextInfo)) {
+      gameState.ui.hoverEnemy = nextInfo;
       render();
     }
-    return;
-  }
-  const x = Number(tile.dataset.mapX);
-  const y = Number(tile.dataset.mapY);
-  const enemy = isEnemyVisibleAt(gameState.dungeon.floor, x, y) ? enemyAt(gameState.dungeon.floor, x, y) : null;
-  if (!enemy) {
-    if (gameState.ui.hoverEnemy) {
-      gameState.ui.hoverEnemy = null;
-      render();
-    }
-    return;
-  }
-  const t = getEnemyType(enemy);
-  const nextInfo = { name: t.name, hp: enemy.hp, attack: t.attack, desc: enemyBehaviorText(t.id) };
-  if (JSON.stringify(gameState.ui.hoverEnemy) !== JSON.stringify(nextInfo)) {
-    gameState.ui.hoverEnemy = nextInfo;
-    render();
-  }
-});
+  });
 
-viewEl.addEventListener("mouseleave", () => {
-  if (!gameState.ui.hoverEnemy) return;
-  gameState.ui.hoverEnemy = null;
-  render();
-});
+  viewEl.addEventListener("mouseleave", () => {
+    if (!gameState.ui.hoverEnemy) return;
+    gameState.ui.hoverEnemy = null;
+    render();
+  });
+} else {
+  console.error("[ui] #view not found; pointer interactions are disabled");
+}
 
 window.addEventListener("keydown", (e) => {
   if (DIRS[e.key] && (gameState.phase === "town" || gameState.phase === "playing")) {
@@ -2394,4 +2420,5 @@ window.addEventListener("keyup", (e) => {
 
 loadAssets();
 startEffectLoop();
+initIndependentHelloButton();
 render();
