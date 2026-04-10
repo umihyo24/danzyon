@@ -291,10 +291,16 @@ const gameState = {
 };
 
 const TEMP_ALLOW_DIRECT_DUNGEON_START = true;
+const DEBUG_UI = false;
 
 const hudEl = document.querySelector("#hud");
 const viewEl = document.querySelector("#view");
 const logEl = document.querySelector("#log");
+
+function debugUi(...args) {
+  if (!DEBUG_UI) return;
+  console.debug("[ui-debug]", ...args);
+}
 
 function addLog(msg) {
   gameState.ui.messages.unshift(msg);
@@ -1838,6 +1844,9 @@ function onEnterRoom(area, x, y) {
 }
 
 function update(action, payload = {}) {
+  if (action === "START_GAME" || action === "RESTART" || action === "SELECT_DUNGEON" || action === "CLOSE_DUNGEON_MENU") {
+    debugUi("update", action, { phase: gameState.phase, payload });
+  }
   switch (action) {
     case "START_GAME":
       gameState.town.map = makeTownMap();
@@ -1913,6 +1922,9 @@ function update(action, payload = {}) {
 }
 
 function dispatch(action, payload = {}) {
+  if (action === "START_GAME" || action === "RESTART" || action === "SELECT_DUNGEON" || action === "CLOSE_DUNGEON_MENU") {
+    debugUi("dispatch", action, payload);
+  }
   update(action, payload);
   render();
 }
@@ -2264,15 +2276,24 @@ function render() {
 }
 
 function findInteractiveTarget(e, selector) {
-  const direct = e.target.closest(selector);
+  const direct = e.target instanceof Element ? e.target.closest(selector) : null;
+  debugUi("click target", {
+    selector,
+    type: e.type,
+    targetTag: e.target && e.target.nodeName ? e.target.nodeName : typeof e.target,
+    hasDirect: !!direct,
+    client: [e.clientX, e.clientY],
+  });
   if (direct) return direct;
   if (typeof e.clientX !== "number" || typeof e.clientY !== "number") return null;
   const stack = document.elementsFromPoint(e.clientX, e.clientY);
+  debugUi("elementsFromPoint", stack.slice(0, 5).map((el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${el.className ? `.${String(el.className).replace(/\s+/g, ".")}` : ""}`));
   return stack.find((el) => el instanceof HTMLElement && el.matches(selector)) || null;
 }
 
 document.addEventListener("click", (e) => {
   const btn = findInteractiveTarget(e, "button[data-action]");
+  debugUi("action click resolved", { found: !!btn, action: btn?.dataset?.action || null });
   if (!btn) return;
   dispatch(btn.dataset.action, { style: btn.dataset.style, dungeon: btn.dataset.dungeon });
 });
