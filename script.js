@@ -291,45 +291,15 @@ const gameState = {
 };
 
 const TEMP_ALLOW_DIRECT_DUNGEON_START = true;
-const DEBUG_FLOW = false;
+const DEBUG_UI = false;
 
 const hudEl = document.querySelector("#hud");
 const viewEl = document.querySelector("#view");
 const logEl = document.querySelector("#log");
 
-function debugFlow(...args) {
-  if (!DEBUG_FLOW) return;
-  console.debug("[flow]", ...args);
-}
-
-function hasRequiredUiRoots() {
-  if (!viewEl || !hudEl || !logEl) {
-    console.error("[ui] required root element is missing", {
-      hasView: !!viewEl,
-      hasHud: !!hudEl,
-      hasLog: !!logEl,
-    });
-    return false;
-  }
-  return true;
-}
-
-function initIndependentHelloButton() {
-  const id = "independent-hello-button";
-  if (document.getElementById(id)) return;
-
-  const shell = document.createElement("div");
-  shell.className = "independent-debug-shell";
-  shell.innerHTML = `<button id="${id}" type="button">独立テストボタン</button>`;
-  document.body.appendChild(shell);
-
-  const btn = shell.querySelector(`#${id}`);
-  if (!btn) return;
-
-  btn.addEventListener("click", () => {
-    console.log("Hello World");
-    alert("Hello World");
-  });
+function debugUi(...args) {
+  if (!DEBUG_UI) return;
+  console.debug("[ui-debug]", ...args);
 }
 
 function addLog(msg) {
@@ -1874,7 +1844,9 @@ function onEnterRoom(area, x, y) {
 }
 
 function update(action, payload = {}) {
-  debugFlow("update", action, { phase: gameState.phase, payload });
+  if (action === "START_GAME" || action === "RESTART" || action === "SELECT_DUNGEON" || action === "CLOSE_DUNGEON_MENU") {
+    debugUi("update", action, { phase: gameState.phase, payload });
+  }
   switch (action) {
     case "START_GAME":
       debugFlow("START_GAME entered", { beforePhase: gameState.phase });
@@ -1952,7 +1924,9 @@ function update(action, payload = {}) {
 }
 
 function dispatch(action, payload = {}) {
-  debugFlow("dispatch", action, payload);
+  if (action === "START_GAME" || action === "RESTART" || action === "SELECT_DUNGEON" || action === "CLOSE_DUNGEON_MENU") {
+    debugUi("dispatch", action, payload);
+  }
   update(action, payload);
   render();
 }
@@ -2313,36 +2287,26 @@ function render() {
   renderMessageBox();
 }
 
-function findInteractiveTarget(e, selector, root = document) {
-  const targetEl = e.target instanceof Element ? e.target : null;
-  const direct = targetEl ? targetEl.closest(selector) : null;
-  if (direct && (!root || root === document || root.contains(direct))) return direct;
-
-  const path = typeof e.composedPath === "function" ? e.composedPath() : [];
-  const inPath = path.find((node) => node instanceof Element && node.matches(selector) && (!root || root === document || root.contains(node)));
-  if (inPath) return inPath;
-
+function findInteractiveTarget(e, selector) {
+  const direct = e.target instanceof Element ? e.target.closest(selector) : null;
+  debugUi("click target", {
+    selector,
+    type: e.type,
+    targetTag: e.target && e.target.nodeName ? e.target.nodeName : typeof e.target,
+    hasDirect: !!direct,
+    client: [e.clientX, e.clientY],
+  });
   if (direct) return direct;
   if (typeof e.clientX !== "number" || typeof e.clientY !== "number") return null;
   const stack = document.elementsFromPoint(e.clientX, e.clientY);
-  return stack.find((el) => el instanceof HTMLElement && el.matches(selector) && (!root || root === document || root.contains(el))) || null;
+  debugUi("elementsFromPoint", stack.slice(0, 5).map((el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${el.className ? `.${String(el.className).replace(/\s+/g, ".")}` : ""}`));
+  return stack.find((el) => el instanceof HTMLElement && el.matches(selector)) || null;
 }
 
-function onActionClick(e, source = "view", root = viewEl || document) {
-  const btn = findInteractiveTarget(e, "button[data-action]", root);
-  debugFlow("click", {
-    source,
-    eventType: e.type,
-    targetTag: e.target?.nodeName || null,
-    hasButton: !!btn,
-    action: btn?.dataset?.action || null,
-  });
-  if (!btn) return false;
-  if (!btn.dataset.action) {
-    debugFlow("click ignored: empty data-action", { source });
-    return false;
-  }
-  debugFlow("dispatch from click", { source, action: btn.dataset.action });
+document.addEventListener("click", (e) => {
+  const btn = findInteractiveTarget(e, "button[data-action]");
+  debugUi("action click resolved", { found: !!btn, action: btn?.dataset?.action || null });
+  if (!btn) return;
   dispatch(btn.dataset.action, { style: btn.dataset.style, dungeon: btn.dataset.dungeon });
   return true;
 }
