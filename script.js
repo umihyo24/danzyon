@@ -1,6 +1,6 @@
 const CONFIG = {
   tileSize: 60,
-  viewport: { w: 12, h: 7 },
+  viewport: { w: 12, h: 9 },
   town: { w: 24, h: 16 },
   floor: { w: 40, h: 28 },
   baseEnemyHp: 3,
