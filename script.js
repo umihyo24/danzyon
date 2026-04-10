@@ -274,6 +274,8 @@ const gameState = {
   dungeon: null,
 };
 
+const TEMP_ALLOW_DIRECT_DUNGEON_START = true;
+
 const hudEl = document.querySelector("#hud");
 const viewEl = document.querySelector("#view");
 const logEl = document.querySelector("#log");
@@ -963,7 +965,7 @@ function startRun(dungeonId = "urayama") {
 }
 
 function startDungeonRun(dungeonId = "urayama") {
-  if (!gameState.mission.accepted) {
+  if (!TEMP_ALLOW_DIRECT_DUNGEON_START && !gameState.mission.accepted) {
     addLog("依頼板で任務を受けよう。");
     return;
   }
@@ -1804,10 +1806,8 @@ function update(action, payload = {}) {
       if (gameState.phase === "town") {
         gameState.selection.selectedDungeonId = payload.dungeon && DUNGEON_DEFS[payload.dungeon] ? payload.dungeon : "urayama";
         addLog(`${getDungeonDef(gameState.selection.selectedDungeonId).name}を選択した。`);
+        startDungeonRun(gameState.selection.selectedDungeonId);
       }
-      break;
-    case "START_SELECTED_DUNGEON":
-      if (gameState.phase === "town") startDungeonRun(gameState.selection.selectedDungeonId || "urayama");
       break;
     case "CLOSE_DUNGEON_MENU":
       if (gameState.phase === "town") closeDungeonSelect();
@@ -2097,11 +2097,12 @@ function renderMiniMap(area, cam) {
   return `<div class="minimap" style="grid-template-columns:repeat(${area.width},5px)">${dots}</div>`;
 }
 
-function renderArea(area, hint) {
+function renderArea(area, hint, overlays = "") {
   const cam = cameraFor(area);
   return `
     <div class="field-shell">
       ${renderBoardStage(area, cam, hint)}
+      ${overlays}
     </div>
   `;
 }
@@ -2145,15 +2146,18 @@ function renderMessageBox() {
     .join("");
 }
 
-function renderTownMenu() {
+function renderDungeonSelectModal() {
   if (!gameState.selection.dungeonMenuOpen) return "";
-  const selected = gameState.selection.selectedDungeonId || "urayama";
   return `
-    <div class="phase-actions">
-      <button data-action='SELECT_DUNGEON' data-dungeon='urayama' ${selected === "urayama" ? "disabled" : ""}>裏山</button>
-      <button data-action='SELECT_DUNGEON' data-dungeon='forest' ${selected === "forest" ? "disabled" : ""}>ちかくのもり</button>
-      <button data-action='START_SELECTED_DUNGEON'>出発</button>
-      <button data-action='CLOSE_DUNGEON_MENU'>閉じる</button>
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal-panel dungeon-select-modal" role="dialog" aria-modal="true" aria-label="ダンジョン選択">
+        <h3>行き先を選択</h3>
+        <div class="modal-actions">
+          <button data-action='SELECT_DUNGEON' data-dungeon='urayama'>裏山</button>
+          <button data-action='SELECT_DUNGEON' data-dungeon='forest'>ちかくのもり</button>
+        </div>
+        <button data-action='CLOSE_DUNGEON_MENU'>閉じる</button>
+      </div>
     </div>
   `;
 }
@@ -2193,12 +2197,12 @@ function render() {
   if (gameState.phase === "town") {
     viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
     const townHint = [missionHintText(), gameState.town.hint].filter(Boolean).join(" / ");
-    viewEl.innerHTML = renderArea(gameState.town.map, townHint) + renderTownMenu() + renderStatusPanel();
+    viewEl.innerHTML = renderArea(gameState.town.map, townHint, renderDungeonSelectModal() + renderStatusPanel());
   }
 
   if (gameState.phase === "playing") {
     viewEl.className = gameState.dungeon.unstable ? "floor-unstable" : "";
-    viewEl.innerHTML = renderArea(gameState.dungeon.floor, gameState.dungeon.hint) + renderStatusPanel();
+    viewEl.innerHTML = renderArea(gameState.dungeon.floor, gameState.dungeon.hint, renderStatusPanel());
   }
 
   if (gameState.phase === "gameover") {
