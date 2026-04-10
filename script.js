@@ -2299,7 +2299,15 @@ function findInteractiveTarget(e, selector) {
   if (direct) return direct;
   if (typeof e.clientX !== "number" || typeof e.clientY !== "number") return null;
   const stack = document.elementsFromPoint(e.clientX, e.clientY);
-  debugUi("elementsFromPoint", stack.slice(0, 5).map((el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${el.className ? `.${String(el.className).replace(/\s+/g, ".")}` : ""}`));
+  debugUi(
+    "elementsFromPoint",
+    stack.slice(0, 5).map((el) => {
+      const tag = el.tagName ? el.tagName.toLowerCase() : "unknown";
+      const id = el.id ? `#${el.id}` : "";
+      const cls = el.className ? `.${String(el.className).trim().replace(/\s+/g, ".")}` : "";
+      return `${tag}${id}${cls}`;
+    })
+  );
   return stack.find((el) => el instanceof HTMLElement && el.matches(selector)) || null;
 }
 
