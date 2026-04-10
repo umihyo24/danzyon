@@ -36,6 +36,7 @@ body {
 }
 
 #view {
+  position: relative;
   display: flex;
   align-items: stretch;
   justify-content: center;
@@ -216,17 +217,21 @@ body {
 }
 
 .dungeon-stage {
-  width: min(100%, 1080px);
+  width: min(100%, 1280px);
   height: 100%;
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-items: center;
+  align-items: start;
+  gap: 0.5rem;
 }
 
 .stage-main {
+  grid-column: 1;
+  grid-row: 1;
   position: relative;
   width: min-content;
   padding: 0.28rem;
@@ -244,12 +249,10 @@ body {
   font-size: 0.72rem;
   color: #9f97bb;
   opacity: 0.9;
-  min-height: 0;
+  min-height: 1.1rem;
   text-align: left;
-  max-width: 50ch;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 34ch;
+  line-height: 1.35;
 }
 
 .projectile-layer {
@@ -468,12 +471,12 @@ button:hover { background: #4b3f68; }
 .mini-dot.player { background: #9effba; }
 
 .stage-corner-panel {
-  position: absolute;
-  right: 0.5rem;
-  top: 0.5rem;
+  grid-column: 2;
+  grid-row: 1;
   display: grid;
-  gap: 0.28rem;
-  justify-items: end;
+  gap: 0.35rem;
+  justify-items: stretch;
+  width: 100%;
   z-index: 2;
 }
 
@@ -494,54 +497,94 @@ button:hover { background: #4b3f68; }
 }
 
 .stage-bottom-panel {
-  width: min(100%, 760px);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.45rem;
-  padding: 0.18rem 0.32rem;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  width: min(100%, 1090px);
+  display: block;
+  padding: 0.28rem 0.35rem;
   border: 1px solid rgba(126, 145, 165, 0.28);
   border-radius: 9px;
   background: rgba(7, 17, 25, 0.75);
 }
 
-.inventory-compact {
+.inventory-box {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.inventory-head {
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.4rem;
 }
 
 .inventory-label {
-  font-size: 0.7rem;
+  font-size: 0.76rem;
   color: #d4dbe9;
+  font-weight: 700;
 }
 
-.inventory-row {
-  display: flex;
+.inventory-count {
+  font-size: 0.7rem;
+  color: #abc4d7;
+}
+
+.inventory-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.inventory-entry {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 2.7rem 1.6rem 1fr auto;
   align-items: center;
-  gap: 0.2rem;
-}
-
-.inventory-chip {
+  gap: 0.3rem;
   border: 1px solid #726998;
   border-radius: 7px;
   background: rgba(20, 17, 30, 0.9);
-  min-height: 24px;
-  font-size: 0.76rem;
+  min-height: 28px;
+  font-size: 0.74rem;
   color: #fff;
-  padding: 0.05rem 0.3rem;
+  padding: 0.14rem 0.38rem;
+  text-align: left;
 }
 
-.inventory-chip.compact {
-  min-width: 28px;
-  padding: 0.08rem 0.26rem;
+.inventory-entry.empty {
+  border-color: rgba(124, 133, 150, 0.55);
+  background: rgba(12, 16, 22, 0.55);
+  color: #8f9aaa;
 }
 
-.inventory-chip:hover {
+.inventory-entry:hover {
   background: #3f3558;
 }
 
+.slot-index {
+  color: #acbad3;
+  font-variant-numeric: tabular-nums;
+}
+
+.slot-icon {
+  text-align: center;
+}
+
+.slot-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot-state {
+  color: #9cf0a7;
+  font-size: 0.68rem;
+}
+
 .phase-actions {
+  position: relative;
+  z-index: 6;
   display: flex;
   justify-content: center;
   gap: 0.35rem;
@@ -557,9 +600,12 @@ button:hover { background: #4b3f68; }
   .grid-wrap {
     --tile-step: 57px;
   }
-  .stage-corner-panel {
-    right: 0.35rem;
-    top: 0.35rem;
+  .dungeon-stage {
+    grid-template-columns: minmax(0, 1fr) 250px;
+    align-content: start;
+  }
+  .inventory-list {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -575,20 +621,26 @@ button:hover { background: #4b3f68; }
     gap: 2px;
   }
   .dungeon-stage {
-    justify-content: flex-start;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    justify-items: stretch;
+    align-content: start;
   }
   .stage-corner-panel {
-    position: static;
-    justify-items: start;
-    width: min(100%, 760px);
-    grid-template-columns: auto 1fr;
-    align-items: start;
+    grid-column: 1;
+    grid-row: 2;
+    justify-items: stretch;
+    width: 100%;
   }
   .stage-bottom-panel {
-    flex-direction: column;
-    align-items: flex-start;
+    grid-column: 1;
+    grid-row: 3;
+    width: 100%;
   }
   .hint-side {
     max-width: 100%;
+  }
+  .inventory-list {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,6 +1,6 @@
 const CONFIG = {
   tileSize: 60,
-  viewport: { w: 9, h: 9 },
+  viewport: { w: 12, h: 7 },
   town: { w: 24, h: 16 },
   floor: { w: 40, h: 28 },
   baseEnemyHp: 3,
@@ -1903,20 +1903,40 @@ function renderEnemyCompact() {
   return `<div class="enemy-compact"><strong>${hover.name}</strong><span>HP ${hover.hp} / ATK ${hover.attack}</span></div>`;
 }
 
-function renderInventoryCompact() {
-  const slotsHtml = gameState.player.inventory
-    .map((slot, idx) => ({ slot, idx }))
-    .filter((entry) => entry.slot)
-    .slice(0, 6)
-    .map((entry) => `<button data-slot-index="${entry.idx}" class="inventory-chip compact" title="アイテムを使う">${entry.slot.emoji}</button>`)
-    .join("");
-  const carryCount = gameState.player.inventory.filter(Boolean).length;
-  return `
-    <div class="inventory-compact">
-      <span class="inventory-label">道具 ${carryCount}</span>
-      <div class="inventory-row">
-        ${slotsHtml || `<span class="meta">なし</span>`}
+function renderInventoryEntry(slot, idx) {
+  const slotLabel = String(idx + 1).padStart(2, "0");
+  if (!slot) {
+    return `
+      <div class="inventory-entry empty" data-slot-index="${idx}">
+        <span class="slot-index">#${slotLabel}</span>
+        <span class="slot-icon">—</span>
+        <span class="slot-label">空きスロット</span>
       </div>
+    `;
+  }
+  const equipped = isEquipped(slot.type);
+  return `
+    <button data-slot-index="${idx}" class="inventory-entry" title="アイテムを使う">
+      <span class="slot-index">#${slotLabel}</span>
+      <span class="slot-icon">${slot.emoji || "🎒"}</span>
+      <span class="slot-label">${slot.name}</span>
+      <span class="slot-state">${equipped ? "装備中" : ""}</span>
+    </button>
+  `;
+}
+
+function renderInventoryBox() {
+  const slots = gameState.player.inventory.slice(0, CONFIG.inventorySlots);
+  while (slots.length < CONFIG.inventorySlots) slots.push(null);
+  const slotsHtml = slots.map((slot, idx) => renderInventoryEntry(slot, idx)).join("");
+  const carryCount = slots.filter(Boolean).length;
+  return `
+    <div class="inventory-box">
+      <div class="inventory-head">
+        <span class="inventory-label">インベントリ</span>
+        <span class="inventory-count">${carryCount}/${CONFIG.inventorySlots}</span>
+      </div>
+      <div class="inventory-list">${slotsHtml}</div>
     </div>
   `;
 }
@@ -1926,10 +1946,10 @@ function renderBoardSupport(area, cam, hint) {
     <aside class="stage-corner-panel">
       ${renderMiniMap(area, cam)}
       ${renderEnemyCompact()}
+      <div class="hint-side">${hint || ""}</div>
     </aside>
     <div class="stage-bottom-panel">
-      <div class="hint-side">${hint || ""}</div>
-      ${renderInventoryCompact()}
+      ${renderInventoryBox()}
     </div>
   `;
 }
@@ -2120,14 +2140,22 @@ function render() {
   renderMessageBox();
 }
 
+function findInteractiveTarget(e, selector) {
+  const direct = e.target.closest(selector);
+  if (direct) return direct;
+  if (typeof e.clientX !== "number" || typeof e.clientY !== "number") return null;
+  const stack = document.elementsFromPoint(e.clientX, e.clientY);
+  return stack.find((el) => el instanceof HTMLElement && el.matches(selector)) || null;
+}
+
 document.addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-action]");
+  const btn = findInteractiveTarget(e, "button[data-action]");
   if (!btn) return;
   dispatch(btn.dataset.action, { style: btn.dataset.style, dungeon: btn.dataset.dungeon });
 });
 
 document.addEventListener("click", (e) => {
-  const slotBtn = e.target.closest("[data-slot-index]");
+  const slotBtn = findInteractiveTarget(e, "[data-slot-index]");
   if (!slotBtn) return;
   dispatch("USE_ITEM", { index: Number(slotBtn.dataset.slotIndex), consumeTurn: true });
 });
