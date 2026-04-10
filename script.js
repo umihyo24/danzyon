@@ -69,6 +69,11 @@ const DUNGEON_DEFS = {
     events: {
       bossFloor: 5,
     },
+    fov: {
+      corridorRadius: 2,
+      corridorMax: 3,
+      roomPadding: 1,
+    },
   },
   forest: {
     id: "forest",
@@ -78,6 +83,11 @@ const DUNGEON_DEFS = {
     mission: "倒れている訓練教官を救助する",
     events: {
       downedNpcFloor: 3,
+    },
+    fov: {
+      corridorRadius: Number.POSITIVE_INFINITY,
+      corridorMax: Number.POSITIVE_INFINITY,
+      roomPadding: 0,
     },
   },
 };
@@ -853,6 +863,16 @@ function decorateDungeonTiles(area, centers) {
 function getDungeonDef(dungeonId) {
   if (!dungeonId) return DUNGEON_DEFS.urayama;
   return DUNGEON_DEFS[dungeonId] || DUNGEON_DEFS.urayama;
+}
+
+function getCurrentFovConfig() {
+  const dungeonId = gameState.dungeon?.id;
+  const def = getDungeonDef(dungeonId);
+  return def.fov || {
+    corridorRadius: Number.POSITIVE_INFINITY,
+    corridorMax: Number.POSITIVE_INFINITY,
+    roomPadding: 0,
+  };
 }
 
 function openDungeonSelect() {
@@ -1681,6 +1701,7 @@ function updateFov() {
   if (gameState.phase !== "playing") return;
   const area = currentArea();
   const p = lookOrigin(area);
+  const fov = getCurrentFovConfig();
   const visible = {};
   const inRoomIndex = roomIndexAt(area, area.playerPos.x, area.playerPos.y);
   const lookActive = gameState.input.lookMode && !!gameState.ui.lookCursor;
@@ -1691,19 +1712,20 @@ function updateFov() {
   };
   if (inRoomIndex >= 0) {
     const room = area.rooms[inRoomIndex];
-    for (let y = room.y - 1; y <= room.y + room.h; y++) {
-      for (let x = room.x - 1; x <= room.x + room.w; x++) {
+    for (let y = room.y - fov.roomPadding; y <= room.y + room.h + fov.roomPadding; y++) {
+      for (let x = room.x - fov.roomPadding; x <= room.x + room.w + fov.roomPadding; x++) {
         if (!inBounds(area, x, y)) continue;
         markVisible(x, y);
       }
     }
   } else {
-    for (let y = p.y - 3; y <= p.y + 3; y++) {
-      for (let x = p.x - 3; x <= p.x + 3; x++) {
+    const scanRange = Number.isFinite(fov.corridorMax) ? fov.corridorMax : Math.max(area.width, area.height);
+    for (let y = p.y - scanRange; y <= p.y + scanRange; y++) {
+      for (let x = p.x - scanRange; x <= p.x + scanRange; x++) {
         if (!inBounds(area, x, y)) continue;
         const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
         const isRoomTile = roomIndexAt(area, x, y) >= 0;
-        if (dist > 2 && !(isRoomTile && dist <= 3)) continue;
+        if (dist > fov.corridorRadius && !(isRoomTile && dist <= fov.corridorMax)) continue;
         markVisible(x, y);
       }
     }
