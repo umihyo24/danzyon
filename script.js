@@ -314,6 +314,24 @@ function hasRequiredUiRoots() {
   return true;
 }
 
+function initIndependentHelloButton() {
+  const id = "independent-hello-button";
+  if (document.getElementById(id)) return;
+
+  const shell = document.createElement("div");
+  shell.className = "independent-debug-shell";
+  shell.innerHTML = `<button id="${id}" type="button">独立テストボタン</button>`;
+  document.body.appendChild(shell);
+
+  const btn = shell.querySelector(`#${id}`);
+  if (!btn) return;
+
+  btn.addEventListener("click", () => {
+    console.log("Hello World");
+    alert("Hello World");
+  });
+}
+
 function addLog(msg) {
   gameState.ui.messages.unshift(msg);
   gameState.ui.messages = gameState.ui.messages.slice(0, CONFIG.logLimit);
@@ -2430,4 +2448,5 @@ window.addEventListener("keyup", (e) => {
 
 loadAssets();
 startEffectLoop();
+initIndependentHelloButton();
 render();
