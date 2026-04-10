@@ -2295,18 +2295,30 @@ function render() {
   renderMessageBox();
 }
 
-function findInteractiveTarget(e, selector) {
+function findInteractiveTarget(e, selector, root = document) {
   const targetEl = e.target instanceof Element ? e.target : null;
   const direct = targetEl ? targetEl.closest(selector) : null;
+  if (direct && (!root || root === document || root.contains(direct))) return direct;
+
+  const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+  const inPath = path.find((node) => node instanceof Element && node.matches(selector) && (!root || root === document || root.contains(node)));
+  if (inPath) return inPath;
+
   if (direct) return direct;
   if (typeof e.clientX !== "number" || typeof e.clientY !== "number") return null;
   const stack = document.elementsFromPoint(e.clientX, e.clientY);
-  return stack.find((el) => el instanceof HTMLElement && el.matches(selector)) || null;
+  return stack.find((el) => el instanceof HTMLElement && el.matches(selector) && (!root || root === document || root.contains(el))) || null;
 }
 
-function onActionClick(e, source = "document") {
-  const btn = findInteractiveTarget(e, "button[data-action]");
-  debugFlow("click", { source, hasButton: !!btn, action: btn?.dataset?.action || null });
+function onActionClick(e, source = "view", root = viewEl || document) {
+  const btn = findInteractiveTarget(e, "button[data-action]", root);
+  debugFlow("click", {
+    source,
+    eventType: e.type,
+    targetTag: e.target?.nodeName || null,
+    hasButton: !!btn,
+    action: btn?.dataset?.action || null,
+  });
   if (!btn) return false;
   if (!btn.dataset.action) {
     debugFlow("click ignored: empty data-action", { source });
@@ -2319,15 +2331,11 @@ function onActionClick(e, source = "document") {
 
 viewEl?.addEventListener("click", (e) => {
   const beforePhase = gameState.phase;
-  const handled = onActionClick(e, "view");
+  const handled = onActionClick(e, "view", viewEl);
   if (handled) {
     debugFlow("click handled in view; stop propagation", { beforePhase, afterPhase: gameState.phase });
     e.stopPropagation();
   }
-});
-
-document.addEventListener("click", (e) => {
-  onActionClick(e, "document");
 });
 
 document.addEventListener("click", (e) => {
