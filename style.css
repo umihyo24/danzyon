@@ -36,6 +36,7 @@ body {
 }
 
 #view {
+  position: relative;
   display: flex;
   align-items: stretch;
   justify-content: center;
@@ -582,6 +583,8 @@ button:hover { background: #4b3f68; }
 }
 
 .phase-actions {
+  position: relative;
+  z-index: 6;
   display: flex;
   justify-content: center;
   gap: 0.35rem;

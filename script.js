@@ -2140,14 +2140,22 @@ function render() {
   renderMessageBox();
 }
 
+function findInteractiveTarget(e, selector) {
+  const direct = e.target.closest(selector);
+  if (direct) return direct;
+  if (typeof e.clientX !== "number" || typeof e.clientY !== "number") return null;
+  const stack = document.elementsFromPoint(e.clientX, e.clientY);
+  return stack.find((el) => el instanceof HTMLElement && el.matches(selector)) || null;
+}
+
 document.addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-action]");
+  const btn = findInteractiveTarget(e, "button[data-action]");
   if (!btn) return;
   dispatch(btn.dataset.action, { style: btn.dataset.style, dungeon: btn.dataset.dungeon });
 });
 
 document.addEventListener("click", (e) => {
-  const slotBtn = e.target.closest("[data-slot-index]");
+  const slotBtn = findInteractiveTarget(e, "[data-slot-index]");
   if (!slotBtn) return;
   dispatch("USE_ITEM", { index: Number(slotBtn.dataset.slotIndex), consumeTurn: true });
 });
