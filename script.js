@@ -87,9 +87,15 @@ const DUNGEON_DEFS = {
     fov: {
       corridorRadius: Number.POSITIVE_INFINITY,
       corridorMax: Number.POSITIVE_INFINITY,
-      roomPadding: 0,
+      roomPadding: Number.POSITIVE_INFINITY,
     },
   },
+};
+
+const DEFAULT_DISCOVERY_FOV = {
+  corridorRadius: 2,
+  corridorMax: 3,
+  roomPadding: 1,
 };
 
 const ENEMY_TYPES = {
@@ -873,6 +879,29 @@ function getCurrentFovConfig() {
     corridorMax: Number.POSITIVE_INFINITY,
     roomPadding: 0,
   };
+}
+
+function getScanRange(area, corridorMax) {
+  if (Number.isFinite(corridorMax)) return corridorMax;
+  return Math.max(area.width, area.height);
+}
+
+function isWithinFov(area, origin, x, y, fov) {
+  const originRoomIndex = roomIndexAt(area, origin.x, origin.y);
+  if (originRoomIndex >= 0) {
+    const room = area.rooms[originRoomIndex];
+    if (Number.isFinite(fov.roomPadding)) {
+      return (
+        x >= room.x - fov.roomPadding &&
+        x <= room.x + room.w + fov.roomPadding &&
+        y >= room.y - fov.roomPadding &&
+        y <= room.y + room.h + fov.roomPadding
+      );
+    }
+  }
+  const dist = Math.abs(x - origin.x) + Math.abs(y - origin.y);
+  const isRoomTile = roomIndexAt(area, x, y) >= 0;
+  return dist <= fov.corridorRadius || (isRoomTile && dist <= fov.corridorMax);
 }
 
 function openDungeonSelect() {
@@ -1705,12 +1734,13 @@ function updateFov() {
   const visible = {};
   const inRoomIndex = roomIndexAt(area, area.playerPos.x, area.playerPos.y);
   const lookActive = gameState.input.lookMode && !!gameState.ui.lookCursor;
+  const shouldDiscover = (x, y) => isWithinFov(area, area.playerPos, x, y, DEFAULT_DISCOVERY_FOV);
   const markVisible = (x, y) => {
     const key = tileKey(x, y);
     visible[key] = true;
-    if (!lookActive) gameState.dungeon.discovered[key] = true;
+    if (!lookActive && shouldDiscover(x, y)) gameState.dungeon.discovered[key] = true;
   };
-  if (inRoomIndex >= 0) {
+  if (inRoomIndex >= 0 && Number.isFinite(fov.roomPadding)) {
     const room = area.rooms[inRoomIndex];
     for (let y = room.y - fov.roomPadding; y <= room.y + room.h + fov.roomPadding; y++) {
       for (let x = room.x - fov.roomPadding; x <= room.x + room.w + fov.roomPadding; x++) {
@@ -1719,13 +1749,11 @@ function updateFov() {
       }
     }
   } else {
-    const scanRange = Number.isFinite(fov.corridorMax) ? fov.corridorMax : Math.max(area.width, area.height);
+    const scanRange = getScanRange(area, fov.corridorMax);
     for (let y = p.y - scanRange; y <= p.y + scanRange; y++) {
       for (let x = p.x - scanRange; x <= p.x + scanRange; x++) {
         if (!inBounds(area, x, y)) continue;
-        const dist = Math.abs(x - p.x) + Math.abs(y - p.y);
-        const isRoomTile = roomIndexAt(area, x, y) >= 0;
-        if (dist > fov.corridorRadius && !(isRoomTile && dist <= fov.corridorMax)) continue;
+        if (!isWithinFov(area, p, x, y, fov)) continue;
         markVisible(x, y);
       }
     }
