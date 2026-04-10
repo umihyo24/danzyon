@@ -436,10 +436,23 @@ function nearestFloorTile(area, startX, startY) {
   return null;
 }
 
-function canSpawnEnemy(area, x, y) {
+function playerRoomIndex(area) {
+  if (!area?.playerPos) return -1;
+  return roomIndexAt(area, area.playerPos.x, area.playerPos.y);
+}
+
+function isPlayerRoomTile(area, x, y) {
+  const currentRoomIndex = playerRoomIndex(area);
+  if (currentRoomIndex < 0) return false;
+  return roomIndexAt(area, x, y) === currentRoomIndex;
+}
+
+function canSpawnEnemy(area, x, y, options = {}) {
+  const { excludePlayerRoom = false } = options;
   if (tileAt(area, x, y) !== "floor") return false;
   if (enemyAt(area, x, y)) return false;
   if (objectAt(area, x, y)) return false;
+  if (excludePlayerRoom && isPlayerRoomTile(area, x, y)) return false;
   return true;
 }
 
@@ -453,7 +466,8 @@ function spawnEnemyOfType(area, x, y, typeId, hpOverride = null) {
   if (!pos) return;
   const type = ENEMY_TYPES[typeId] || ENEMY_TYPES.hippo;
   const hp = hpOverride ?? type.maxHp;
-  if (canSpawnEnemy(area, pos.x, pos.y)) {
+  const spawnOptions = { excludePlayerRoom: true };
+  if (canSpawnEnemy(area, pos.x, pos.y, spawnOptions)) {
     area.enemies.push({ typeId: type.id, x: pos.x, y: pos.y, hp, facing: Math.random() < 0.5 ? -1 : 1, turnCounter: 0 });
     return;
   }
@@ -461,7 +475,7 @@ function spawnEnemyOfType(area, x, y, typeId, hpOverride = null) {
     for (let yy = pos.y - r; yy <= pos.y + r; yy++) {
       for (let xx = pos.x - r; xx <= pos.x + r; xx++) {
         if (!inBounds(area, xx, yy)) continue;
-        if (canSpawnEnemy(area, xx, yy)) {
+        if (canSpawnEnemy(area, xx, yy, spawnOptions)) {
           area.enemies.push({ typeId: type.id, x: xx, y: yy, hp, facing: Math.random() < 0.5 ? -1 : 1, turnCounter: 0 });
           return;
         }
@@ -981,6 +995,14 @@ function enemyCanTraverse(type, tile) {
   return true;
 }
 
+function canMoveDiagonally(area, fromX, fromY, toX, toY) {
+  const isDiagonal = Math.abs(toX - fromX) === 1 && Math.abs(toY - fromY) === 1;
+  if (!isDiagonal) return true;
+  const sideA = tileAt(area, toX, fromY);
+  const sideB = tileAt(area, fromX, toY);
+  return sideA !== "wall" && sideB !== "wall";
+}
+
 function enemyBehaviorText(typeId) {
   const texts = {
     penguin: "低HP・直線氷弾",
@@ -1218,6 +1240,11 @@ function tryMovePlayer(dx, dy) {
   const ny = p.y + dy;
   updateFacing(dx, dy);
 
+  if (!canMoveDiagonally(area, p.x, p.y, nx, ny)) {
+    addLog("壁の角はすり抜けられない。");
+    return false;
+  }
+
   const targetTile = tileAt(area, nx, ny);
   if (targetTile === "wall") {
     addLog("壁で進めない。");
@@ -1370,6 +1397,7 @@ function moveEnemyTowardPlayer(enemy, area, playerPos) {
   }
   const next = options.find(
     (c) =>
+      canMoveDiagonally(area, enemy.x, enemy.y, c.x, c.y) &&
       tileAt(area, c.x, c.y) !== "wall" &&
       enemyCanTraverse(getEnemyType(enemy), tileAt(area, c.x, c.y)) &&
       !enemyAt(area, c.x, c.y) &&
@@ -1500,7 +1528,7 @@ function applyEnemyPressure() {
   const spawnCandidates = [];
   for (let y = 1; y < area.height - 1; y++) {
     for (let x = 1; x < area.width - 1; x++) {
-      if (!canSpawnEnemy(area, x, y)) continue;
+      if (!canSpawnEnemy(area, x, y, { excludePlayerRoom: true })) continue;
       if (distance({ x, y }, p) < 6) continue;
       spawnCandidates.push({ x, y });
     }
@@ -1753,7 +1781,7 @@ function stepToward(area, from, target) {
     const nx = from.x + c.dx;
     const ny = from.y + c.dy;
     const tile = tileAt(area, nx, ny);
-    return tile !== "wall" && playerCanTraverse(tile) && !enemyAt(area, nx, ny);
+    return canMoveDiagonally(area, from.x, from.y, nx, ny) && tile !== "wall" && playerCanTraverse(tile) && !enemyAt(area, nx, ny);
   }) || null;
 }
 
