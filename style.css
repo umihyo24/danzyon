@@ -229,6 +229,8 @@ body {
 }
 
 .stage-main {
+  grid-column: 1;
+  grid-row: 1;
   position: relative;
   width: min-content;
   padding: 0.28rem;
