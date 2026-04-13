@@ -154,11 +154,16 @@ const OBJECT_TYPES = {
   },
   D: {
     label: "ダンジョン入口",
-    hint: "E: ダンジョンへ",
+    hint: "入口: 踏み込んで探索開始",
     symbol: "🕳️",
     renderType: "gate",
-    interact() {
-      openDungeonSelect();
+    autoTriggerOnStep: true,
+    interact(_, obj) {
+      startDungeonRun(obj?.destinationDungeonId || "urayama");
+    },
+    getSymbol(obj) {
+      if (obj?.destinationDungeonId === "forest") return "🌲";
+      return "🕳️";
     },
   },
   S: {
@@ -175,17 +180,9 @@ const OBJECT_TYPES = {
     hint: "渦: 深く潜る",
     symbol: "🌀",
     renderType: "gate",
+    autoTriggerOnStep: true,
     interact() {
       descendDepth();
-    },
-  },
-  X: {
-    label: "帰還ポイント",
-    hint: "E: 帰還する",
-    symbol: "🚪",
-    renderType: "gate",
-    interact() {
-      onReturnRun();
     },
   },
   N: {
@@ -230,7 +227,7 @@ const OBJECT_TYPES = {
 };
 
 const gameState = {
-  phase: "start", // start | town | playing | gameover
+  phase: "town", // town | playing | gameover
   assets: { images: {}, missing: {}, loaded: false },
   ui: {
     messages: ["ようこそ。"],
@@ -282,10 +279,6 @@ const gameState = {
       trainingFacility: false,
     },
     clearedDungeons: {},
-  },
-  selection: {
-    dungeonMenuOpen: false,
-    selectedDungeonId: null,
   },
   dungeon: null,
 };
@@ -702,8 +695,6 @@ function placeDungeonContent(area, rooms, roles, depth, template) {
   area.playerPos = { x: start.x, y: start.y };
   area.startPos = { x: start.x, y: start.y };
 
-  const returnPos = nearestFloorTile(area, start.x + 2, start.y) || nearestFloorTile(area, start.x + 1, start.y + 1) || start;
-  area.objects.push({ type: "X", x: returnPos.x, y: returnPos.y });
   const stairsPos = nearestFloorTile(area, goal.x - 1, goal.y + (goal.y >= start.y ? 1 : -1)) || goal;
   area.objects.push({ type: "V", x: stairsPos.x, y: stairsPos.y });
   if (template === "treasure" && roles.treasureIndex !== null) {
@@ -747,7 +738,7 @@ function placeDungeonContent(area, rooms, roles, depth, template) {
     spawnEnemyOfType(area, s.pos.x + (i % 2), s.pos.y + ((i + 1) % 2), s.typeId, ENEMY_TYPES[s.typeId].maxHp + depth - 1);
   }
 
-  const pathMidX = Math.floor((returnPos.x + stairsPos.x) / 2);
+  const pathMidX = Math.floor((start.x + stairsPos.x) / 2);
   const hasMidInterest = area.items.some((it) => Math.abs(it.x - pathMidX) <= 2) || area.enemies.some((e) => Math.abs(e.x - pathMidX) <= 2);
   if (!hasMidInterest) {
     const mid = nearestFreeFloorTile(area, pathMidX, start.y) || nearestFloorTile(area, pathMidX, start.y) || start;
@@ -772,7 +763,6 @@ function makeFixedDungeonFloor(dungeonId, depth = 1) {
 
   area.playerPos = { x: centers[0].x, y: centers[0].y };
   area.startPos = { x: centers[0].x, y: centers[0].y };
-  area.objects.push({ type: "X", x: centers[0].x + 1, y: centers[0].y + 1 });
   area.objects.push({ type: "V", x: centers[5].x, y: centers[5].y });
   area.objects.push({ type: "C", x: centers[2].x + 1, y: centers[2].y - 1, opened: false });
   [centers[2], centers[3]].forEach((c, i) => addItemSafe(area, "H", c.x + (i - 1), c.y));
@@ -932,15 +922,6 @@ function isWithinFov(area, origin, x, y, fov) {
   return dist <= fov.corridorRadius || (isRoomTile && dist <= fov.corridorMax);
 }
 
-function openDungeonSelect() {
-  gameState.selection.dungeonMenuOpen = true;
-  if (!gameState.selection.selectedDungeonId) gameState.selection.selectedDungeonId = "urayama";
-  addLog("行き先のダンジョンを選択しよう。");
-}
-
-function closeDungeonSelect() {
-  gameState.selection.dungeonMenuOpen = false;
-}
 
 function hasInventoryItemType(type) {
   return gameState.player.inventory.some((slot) => slot && slot.type === type);
@@ -1018,8 +999,9 @@ function makeTownMap() {
   if (gameState.meta.unlocked.trainingFacility) area.objects.push({ type: "T", x: 3, y: 3 }); // training is distant
   area.objects.push({ type: "R", x: 16, y: 11 });
   area.objects.push({ type: "B", x: 18, y: 11 }); // quest board close to loop
-  area.objects.push({ type: "D", x: 20, y: 11 }); // dungeon entrance close to loop
-  area.objects.push({ type: "S", x: 21, y: 11}); //
+  area.objects.push({ type: "D", x: 20, y: 10, destinationDungeonId: "urayama" });
+  area.objects.push({ type: "D", x: 20, y: 12, destinationDungeonId: "forest" });
+  area.objects.push({ type: "S", x: 21, y: 11 });
   return area;
 }
 
@@ -1047,7 +1029,6 @@ function startDungeonRun(dungeonId = "urayama") {
     return;
   }
   const def = getDungeonDef(dungeonId);
-  closeDungeonSelect();
   gameState.phase = "playing";
   gameState.player.hp = gameState.player.maxHp;
   gameState.player.pp = gameState.player.maxPp;
@@ -1214,6 +1195,12 @@ function applyInteraction(obj) {
   if (def && def.interact) def.interact(gameState, obj);
 }
 
+function shouldAutoTriggerObjectOnStep(obj) {
+  if (!obj) return false;
+  const def = getObjectTypeDef(obj.type);
+  return !!def?.autoTriggerOnStep;
+}
+
 function interactNearest() {
   const area = currentArea();
   if (!area) return;
@@ -1377,17 +1364,15 @@ function tryMovePlayer(dx, dy) {
   p.x = nx;
   p.y = ny;
 
+  const stepObj = objectAt(area, nx, ny);
+  if (shouldAutoTriggerObjectOnStep(stepObj)) {
+    applyInteraction(stepObj);
+    updateHint();
+    return true;
+  }
+
   if (gameState.phase === "playing") {
     onEnterRoom(area, nx, ny);
-    const stepObj = objectAt(area, nx, ny);
-    if (stepObj?.type === "V") {
-      descendDepth();
-      return true;
-    }
-    if (stepObj?.type === "X") {
-      onReturnRun();
-      return true;
-    }
     pickupIfAny(area);
     tileEffectOnStep(area);
     endPlayerTurn("move");
@@ -1712,7 +1697,7 @@ function descendDepth() {
     } else if (dungeonId === "forest") {
       addLog("教官の救助が完了していない。");
     } else {
-      addLog("これ以上は潜れない。帰還ポイントから戻ろう。");
+      addLog("これ以上は潜れない。");
     }
     return;
   }
@@ -1866,34 +1851,15 @@ function onEnterRoom(area, x, y) {
 }
 
 function update(action, payload = {}) {
-  if (action === "START_GAME" || action === "RESTART" || action === "SELECT_DUNGEON" || action === "CLOSE_DUNGEON_MENU") {
+  if (action === "RESTART") {
     debugUi("update", action, { phase: gameState.phase, payload });
   }
   switch (action) {
-    case "START_GAME":
-      debugFlow("START_GAME entered", { beforePhase: gameState.phase });
-      gameState.town.map = makeTownMap();
-      gameState.selection.selectedDungeonId = "urayama";
-      closeDungeonSelect();
-      startTown();
-      debugFlow("START_GAME completed", { afterPhase: gameState.phase });
-      addLog("村に着いた。依頼板で任務を受けよう。");
-      break;
     case "MOVE":
       if (gameState.phase === "town" || gameState.phase === "playing") tryMovePlayer(payload.dx, payload.dy);
       break;
     case "INTERACT":
       if (gameState.phase === "town" || gameState.phase === "playing") interactNearest();
-      break;
-    case "SELECT_DUNGEON":
-      if (gameState.phase === "town") {
-        gameState.selection.selectedDungeonId = payload.dungeon && DUNGEON_DEFS[payload.dungeon] ? payload.dungeon : "urayama";
-        addLog(`${getDungeonDef(gameState.selection.selectedDungeonId).name}を選択した。`);
-        startDungeonRun(gameState.selection.selectedDungeonId);
-      }
-      break;
-    case "CLOSE_DUNGEON_MENU":
-      if (gameState.phase === "town") closeDungeonSelect();
       break;
     case "SPECIAL":
       if (gameState.phase === "playing") {
@@ -1929,7 +1895,6 @@ function update(action, payload = {}) {
       break;
     case "RESTART":
       gameState.mission.retrieved = false;
-      closeDungeonSelect();
       startTown();
       addLog("村へ戻った。準備して再挑戦しよう。");
       break;
@@ -1946,7 +1911,7 @@ function update(action, payload = {}) {
 }
 
 function dispatch(action, payload = {}) {
-  if (action === "START_GAME" || action === "RESTART" || action === "SELECT_DUNGEON" || action === "CLOSE_DUNGEON_MENU") {
+  if (action === "RESTART") {
     debugUi("dispatch", action, payload);
   }
   update(action, payload);
@@ -2240,22 +2205,6 @@ function renderMessageBox() {
     .join("");
 }
 
-function renderDungeonSelectModal() {
-  if (!gameState.selection.dungeonMenuOpen) return "";
-  return `
-    <div class="modal-backdrop" role="presentation">
-      <div class="modal-panel dungeon-select-modal" role="dialog" aria-modal="true" aria-label="ダンジョン選択">
-        <h3>行き先を選択</h3>
-        <div class="modal-actions">
-          <button data-action='SELECT_DUNGEON' data-dungeon='urayama'>裏山</button>
-          <button data-action='SELECT_DUNGEON' data-dungeon='forest'>ちかくのもり</button>
-        </div>
-        <button data-action='CLOSE_DUNGEON_MENU'>閉じる</button>
-      </div>
-    </div>
-  `;
-}
-
 function renderStatusPanel() {
   if (!gameState.ui.statusOpen) return "";
   return `
@@ -2285,15 +2234,10 @@ function render() {
   debugFlow("render", { phase: gameState.phase });
   renderHudBar();
 
-  if (gameState.phase === "start") {
-    viewEl.className = "";
-    viewEl.innerHTML = `<div class="field-shell"><h2>開始</h2><p>村で準備を整え、海へ潜って魚を持ち帰ろう。</p><div class="phase-actions"><button data-action='START_GAME'>ゲーム開始</button></div></div>`;
-  }
-
   if (gameState.phase === "town") {
     viewEl.className = gameState.town.upgradedVisual ? "town-upgraded" : "";
     const townHint = [missionHintText(), gameState.town.hint].filter(Boolean).join(" / ");
-    viewEl.innerHTML = renderArea(gameState.town.map, townHint, renderDungeonSelectModal() + renderStatusPanel());
+    viewEl.innerHTML = renderArea(gameState.town.map, townHint, renderStatusPanel());
   }
 
   if (gameState.phase === "playing") {
@@ -2433,4 +2377,6 @@ window.addEventListener("keyup", (e) => {
 
 loadAssets();
 startEffectLoop();
+startTown();
+addLog("村に着いた。入口に入って探索を始めよう。");
 render();
